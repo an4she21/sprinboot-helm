@@ -1,0 +1,84 @@
+name: CI Pipeline - Build, Scan and Push
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY_BACKEND: ai-selfhealing-backend
+  ECR_REPOSITORY_FRONTEND: ai-selfhealing-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for AWS OIDC
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # --- Backend Process ---
+      - name: Build Backend Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$ECR_REPOSITORY_BACKEND:$TAG -f Dockerfile .
+          docker tag $REGISTRY/$ECR_REPOSITORY_BACKEND:$TAG $REGISTRY/$ECR_REPOSITORY_BACKEND:latest
+
+      - name: Scan Backend Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image: ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY_BACKEND:${{ github.sha }}
+          format: 'table'
+          exit-code: '1' # Fail the pipeline if HIGH or CRITICAL vulnerabilities are found
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push Backend Image to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker push $REGISTRY/$ECR_REPOSITORY_BACKEND:$TAG
+          docker push $REGISTRY/$ECR_REPOSITORY_BACKEND:latest
+
+      # --- Frontend Process ---
+      - name: Build Frontend Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$ECR_REPOSITORY_FRONTEND:$TAG -f frontend/Dockerfile ./frontend
+          docker tag $REGISTRY/$ECR_REPOSITORY_FRONTEND:$TAG $REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
+
+      - name: Scan Frontend Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image: ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY_FRONTEND:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push Frontend Image to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker push $REGISTRY/$ECR_REPOSITORY_FRONTEND:$TAG
+          docker push $REGISTRY/$ECR_REPOSITORY_FRONTEND:latest

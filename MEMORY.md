@@ -1,0 +1,5 @@
+- [project-goal](project-goal.md) — Vision and high-level goals
+- [tech-stack](tech-stack.md) — Agreed tools and technologies
+- [roadmap](roadmap.md) — Step-by-step implementation plan
+- [architecture-decisions](architecture-decisions.md) — Justifications for tech choices
+- [quality-standards](quality-standards.md) — Strict requirements for best practices, optimization, and security
