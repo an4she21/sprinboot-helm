@@ -43,12 +43,11 @@ jobs:
           docker tag $REGISTRY/$ECR_REPOSITORY_BACKEND:$TAG $REGISTRY/$ECR_REPOSITORY_BACKEND:latest
 
       - name: Scan Backend Image with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image: ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY_BACKEND:${{ github.sha }}
-          format: 'table'
-          exit-code: '1' # Fail the pipeline if HIGH or CRITICAL vulnerabilities are found
-          severity: 'CRITICAL,HIGH'
+        run: |
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.44.1/trivy_0.44.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.44.1_Linux-64bit.deb
+          trivy image --exit-code 1 --severity CRITICAL,HIGH ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ github.sha }}
+
 
       - name: Push Backend Image to ECR
         env:
@@ -68,12 +67,9 @@ jobs:
           docker tag $REGISTRY/$ECR_REPOSITORY_FRONTEND:$TAG $REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
 
       - name: Scan Frontend Image with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image: ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY_FRONTEND:${{ github.sha }}
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+        run: |
+          trivy image --exit-code 1 --severity CRITICAL,HIGH ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
+
 
       - name: Push Frontend Image to ECR
         env:
