@@ -2,18 +2,20 @@
 FROM node:18-alpine AS build
 WORKDIR /app
 
-# Cache dependencies (only re-downloads when package files change)
 COPY package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps
 
-# Build the React app
 COPY . .
 ARG REACT_APP_API_URL=/api
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
+
 RUN npm run build
 
 # ---- Runtime Stage ----
 FROM nginx:alpine
+
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /usr/share/nginx/html
 
 RUN rm -rf ./*
