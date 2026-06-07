@@ -38,3 +38,21 @@ output "eks_cluster_endpoint" {
 output "rds_endpoint" {
   value = module.rds.db_endpoint
 }
+
+resource "aws_ecr_repository" "backend" {
+  name                 = "ai-selfhealing-backend"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_repository" "frontend" {
+  name                 = "ai-selfhealing-frontend"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}

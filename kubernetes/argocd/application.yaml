@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: 'https://github.com/an4she21/sprinboot-helm' # Replace with actual repo URL
     targetRevision: HEAD
-    path: helm/app # Replace with actual path to your helm chart
+    path: charts/ai-platform
     helm:
       valueFiles:
         - values.yaml
