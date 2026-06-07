@@ -24,6 +24,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "ai-platform.fullname" . }}-config
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: password
           resources:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
