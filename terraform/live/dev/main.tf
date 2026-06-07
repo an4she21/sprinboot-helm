@@ -56,3 +56,24 @@ resource "aws_ecr_repository" "frontend" {
     scan_on_push = true
   }
 }
+
+resource "aws_iam_policy" "ssm_read_policy" {
+  name        = "ai-selfhealing-ssm-read-policy"
+  description = "Allow EKS nodes to read specific SSM parameters"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Effect   = "Allow"
+        Resource = "arn:aws:ssm:eu-north-1:181728646118:parameter/ai-selfhealing/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "node_ssm_attach" {
+  role       = "general-eks-node-group-20260607221902321300000002" # Using the role from the logs
+  policy_arn = aws_iam_policy.ssm_read_policy.arn
+}
