@@ -10,42 +10,23 @@ variable "private_subnets" {
   type = list(string)
 }
 
-module "db_subnet" {
-  source  = "terraform-aws-modules/subnet/aws"
-  version = "~> 5.0"
+resource "aws_security_group" "rds_sg" {
+  name        = "ai-selfhealing-rds-sg"
+  description = "Allow MySQL traffic from VPC"
+  vpc_id      = var.vpc_id
 
-  name = "db-subnet"
-  vpc_id = var.vpc_id
-  cidr = "10.0.20.0/24" # Note: In a real scenario, a DB subnet group needs multiple subnets in different AZs
-}
+  ingress {
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"] # Allow VPC traffic
+  }
 
-module "rds" {
-  source  = "terraform-aws-modules/rds/aws"
-  version = "~> 6.0"
-
-  identifier = "ai-selfhealing-db"
-
-  engine               = "mariadb"
-  engine_version       = "10.6"
-  instance_class       = "db.t3.micro"
-  allocated_storage    = 20
-  max_allocated_storage = 100
-
-  db_name  = var.db_name
-  username = "admin"
-  password = "StrongPassword123!" # Use a secret manager in production
-
-  subnet_ids = [module.db_subnet.id] # Simplified for demo, normally a subnet group
-
-  vpc_security_group_rules = {
-    ingress_mysql = {
-      type                     = "ingress"
-      from_port                = 3306
-      to_port                  = 3306
-      protocol                 = "tcp"
-      cidr_blocks              = ["10.0.0.0/16"] # Allow VPC traffic
-      description              = "Allow MySQL from VPC"
-    }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = {
@@ -54,6 +35,76 @@ module "rds" {
   }
 }
 
+resource "aws_db_subnet_group" "main" {
+  name       = "ai-selfhealing-db-subnet-group"
+  subnet_ids = var.private_subnets
+
+  tags = {
+    Environment = "dev"
+    Project     = "ai-selfhealing"
+  }
+}
+
+resource "aws_db_instance" "this" {
+  identifier           = "ai-selfhealing-db"
+  engine               = "mariadb"
+  engine_version       = "10.6"
+  instance_class       = "db.t3.micro"
+  allocated_storage    = 20
+  max_allocated_storage = 100
+  db_name              = var.db_name
+  username             = "admin"
+  password             = aws_secretsmanager_secret_version.rds_password_val.secret_string
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+
+  skip_final_snapshot    = true
+  storage_encrypted      = true
+
+  tags = {
+    Environment = "dev"
+    Project     = "ai-selfhealing"
+  }
+}
+
+resource "aws_secretsmanager_secret" "rds_password" {
+  name        = "ai-selfhealing-rds-password"
+  description = "RDS root password for ai-selfhealing"
+
+  tags = {
+    Environment = "dev"
+    Project     = "ai-selfhealing"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "rds_password_val" {
+  secret_id     = aws_secretsmanager_secret.rds_password.id
+  secret_string = "StrongPassword123!"
+}
+
+resource "aws_ssm_parameter" "rds_endpoint" {
+  name  = "/ai-selfhealing/dev/rds_endpoint"
+  type  = "String"
+  value = aws_db_instance.this.endpoint
+
+  tags = {
+    Environment = "dev"
+    Project       = "ai-selfhealing"
+  }
+}
+
+resource "aws_ssm_parameter" "rds_db_name" {
+  name  = "/ai-selfhealing/dev/db_name"
+  type  = "String"
+  value = var.db_name
+
+  tags = {
+    Environment = "dev"
+    Project       = "ai-selfhealing"
+  }
+}
+
 output "db_endpoint" {
-  value = module.rds.db_cluster_endpoint # or db_instance_endpoint depending on module version
+  value = aws_db_instance.this.endpoint
 }

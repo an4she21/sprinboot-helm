@@ -23,10 +23,10 @@ module "eks" {
   # Managed Node Groups
   eks_managed_node_groups = {
     general = {
-      instance_types = ["t3.medium"]
+      instance_types = ["t3.small"]
       min_size     = 1
       max_size     = 3
-      desired_capacity = 2
+      desired_capacity = 1
     }
   }
 

@@ -7,17 +7,17 @@
 {{- if .Values.fullnameOverride -}}
 {{- $name = .Values.fullnameOverride -}}
 {{- end -}}
-{{- if and (where .Values.fullnameOverride "" .Values.fullnameOverride) (where .Chart.Name "" .Chart.Name) -}}
+{{- if and .Values.fullnameOverride .Chart.Name -}}
 {{- $name = printf "%s-%s" .Chart.Name .Values.fullnameOverride -}}
 {{- end -}}
-{{- .Crt.LocalName $name | trunc 63 | trimSuffix "-" -}}
+{{- $name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "ai-platform.labels" -}}
 app.kubernetes.io/name: {{ include "ai-platform.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion }}
-app.kubernetes.io/app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
 project: ai-selfhealing
 environment: dev
 {{- end -}}

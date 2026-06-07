@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-selfhealing-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/an4she21/sprinboot-helm' # Replace with actual repo URL
+    targetRevision: HEAD
+    path: helm/app # Replace with actual path to your helm chart
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: ai-selfhealing
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

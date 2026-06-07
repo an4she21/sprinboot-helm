@@ -20,12 +20,14 @@ module "vpc" {
   public_subnets  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   # Private subnets for Worker Nodes and DB
   private_subnets = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+  azs             = ["eu-north-1a", "eu-north-1b", "eu-north-1c"]
 
   enable_nat_gateway = true
+
   single_nat_gateway = true # For cost saving in dev
 
-  dns_support   = true
-  dns_hostnames = true
+  enable_dns_support   = true
+  enable_dns_hostnames = true
 
   tags = {
     Environment = "dev"

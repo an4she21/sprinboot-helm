@@ -3,11 +3,11 @@ replicaCount: 2
 
 image:
   backend:
-    repository: aws_account_id.dkr.ecr.us-east-1.amazonaws.com/ai-selfhealing-backend
+    repository: 181728646118.dkr.ecr.eu-north-1.amazonaws.com/ai-selfhealing-backend
     pullPolicy: IfNotPresent
     tag: "latest"
   frontend:
-    repository: aws_account_id.dkr.ecr.us-east-1.amazonaws.com/ai-selfhealing-frontend
+    repository: 181728646118.dkr.ecr.eu-north-1.amazonaws.com/ai-selfhealing-frontend
     pullPolicy: IfNotPresent
     tag: "latest"
 
@@ -21,7 +21,7 @@ service:
 
 # Database configuration
 database:
-  host: "ai-selfhealing-db.cluster-xyz.us-east-1.rds.amazonaws.com"
+  host: "ai-selfhealing-db.cree8sgg8dvr.eu-north-1.rds.amazonaws.com"
   name: "voiture_db"
   user: "admin"
 
