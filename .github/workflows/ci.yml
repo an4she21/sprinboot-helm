@@ -56,7 +56,7 @@ jobs:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ github.sha }}
           format: table
           exit-code: '1'
-          severity: CRITICAL
+          severity: CRITICAL,HIGH
 
       - name: Push Backend Image to ECR
         env:
@@ -87,7 +87,7 @@ jobs:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
           format: table
           exit-code: '1'
-          severity: CRITICAL
+          severity: CRITICAL,HIGH
 
       - name: Push Frontend Image to ECR
         env:
