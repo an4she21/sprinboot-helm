@@ -1,11 +1,9 @@
-# Prometheus lightweight values (Corrected for wrapper chart dependency)
+# Prometheus lightweight values (Using emptyDir for test environment)
 prometheus:
   server:
     retain_drop_markers: false
     persistentVolume:
-      enabled: true
-      storageClass: "gp2"
-      size: 8Gi
+      enabled: false
     resources:
       requests:
         cpu: 100m
@@ -17,9 +15,7 @@ prometheus:
   alertmanager:
     enabled: true
     persistentVolume:
-      enabled: true
-      storageClass: "gp2"
-      size: 2Gi
+      enabled: false
 
   pushgateway:
     enabled: false
