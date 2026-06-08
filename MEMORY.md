@@ -1,3 +1,4 @@
+
 - [project-goal](project-goal.md) — Vision and high-level goals
 - [tech-stack](tech-stack.md) — Agreed tools and technologies
 - [roadmap](roadmap.md) — Step-by-step implementation plan
