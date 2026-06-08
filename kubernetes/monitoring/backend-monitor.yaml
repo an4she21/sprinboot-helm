@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-platform-backend-monitor
+  namespace: ai-selfhealing
+  labels:
+    release: monitoring-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-platform
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s
