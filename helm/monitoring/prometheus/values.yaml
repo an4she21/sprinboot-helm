@@ -1,16 +1,14 @@
 # Prometheus lightweight values with AWS EBS Storage
 server:
-  retain_drop_markers: false
-  persistence:
+  persistentVolume:
     enabled: true
-    storageClass: "gp2"
-    size: 10Gi
+    storageClass: gp2
+    size: 8Gi
 
 alertmanager:
-  enabled: true
-  persistence:
+  persistentVolume:
     enabled: true
-    storageClass: "gp2"
+    storageClass: gp2
     size: 2Gi
 
 pushgateway:
