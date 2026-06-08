@@ -1,26 +1,25 @@
-# Prometheus lightweight values (Fixed for wrapper chart)
-# These keys must match the official prometheus chart structure exactly
+# Prometheus lightweight values (Corrected for wrapper chart dependency)
+prometheus:
+  server:
+    retain_drop_markers: false
+    persistentVolume:
+      enabled: true
+      storageClass: "gp2"
+      size: 8Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
-server:
-  retain_drop_markers: false
-  persistentVolume:
+  alertmanager:
     enabled: true
-    storageClass: "gp2"
-    size: 8Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+    persistentVolume:
+      enabled: true
+      storageClass: "gp2"
+      size: 2Gi
 
-alertmanager:
-  enabled: true
-  persistentVolume:
-    enabled: true
-    storageClass: "gp2"
-    size: 2Gi
-
-pushgateway:
-  enabled: false
+  pushgateway:
+    enabled: false
