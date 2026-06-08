@@ -1,5 +1,5 @@
 # Default values for ai-platform.
-replicaCount: 2
+replicaCount: 1
 
 image:
   backend:

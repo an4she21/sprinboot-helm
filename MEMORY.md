@@ -9,3 +9,4 @@
 - [Tracking Methodology](tracking-methodology.md) — How we track progress and changes
 - [Deployment Tasks](deployment-tasks.md) — Roadmap for AWS deployment
 
+- [Current Status](current-status.md) — Latest project state
