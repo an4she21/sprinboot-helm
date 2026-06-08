@@ -1,12 +1,20 @@
-# Prometheus lightweight values
+# Prometheus lightweight values with AWS EBS Storage
 server:
   retain_drop_markers: false
+  persistentVolume:
+    enabled: true
+    storageClass: "gp2"
+    size: 10Gi
 
 alertmanager:
-  enabled: false # Disable alertmanager for lightweight setup
+  enabled: true
+  persistentVolume:
+    enabled: true
+    storageClass: "gp2"
+    size: 2Gi
 
 pushgateway:
-  enabled: false # Disable pushgateway
+  enabled: false
 
 prometheus:
   prometheusSpec:
