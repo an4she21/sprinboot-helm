@@ -1,0 +1,17 @@
+# Grafana lightweight values
+service:
+  type: LoadBalancer
+  port: 80
+
+adminPassword: "admin" # For test environment
+
+persistence:
+  enabled: false # Use emptyDir for testing to avoid PVC issues
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

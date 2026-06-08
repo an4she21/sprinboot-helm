@@ -1,0 +1,20 @@
+# Prometheus lightweight values
+server:
+  retain_drop_markers: false
+
+alertmanager:
+  enabled: false # Disable alertmanager for lightweight setup
+
+pushgateway:
+  enabled: false # Disable pushgateway
+
+prometheus:
+  prometheusSpec:
+    # Minimal resources for test environment
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
