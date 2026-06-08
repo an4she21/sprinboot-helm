@@ -3,8 +3,6 @@ service:
   type: LoadBalancer
   port: 80
 
-adminPassword: "admin" # For test environment
-
 persistence:
   enabled: false # Use emptyDir for testing to avoid PVC issues
 
@@ -15,3 +13,11 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+# Securely inject admin password from ExternalSecret
+extraEnv:
+  - name: GF_SECURITY_ADMIN_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: grafana-admin-secret
+        key: admin-password
