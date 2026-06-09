@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-self-healing-agent-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "events", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-self-healing-agent-binding
+subjects:
+- kind: User
+  name: "arn:aws:iam::${ACCOUNT_ID}:role/ai-self-healing-agent-role" # This will be replaced or handled by the Access Entry
+roleRef:
+  kind: ClusterRole
+  name: ai-self-healing-agent-role
+  apiGroup: rbac.authorization.k8s.io

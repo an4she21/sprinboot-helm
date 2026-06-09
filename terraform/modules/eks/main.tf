@@ -10,6 +10,8 @@ variable "private_subnets" {
   type = list(string)
 }
 
+data "aws_caller_identity" "current" {}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
@@ -25,7 +27,7 @@ module "eks" {
     general = {
       instance_types = ["t3.small"]
       min_size     = 1
-      max_size     = 3
+      max_size     = 5
       desired_capacity = 1
     }
   }
@@ -36,6 +38,23 @@ module "eks" {
   tags = {
     Environment = "dev"
     Project     = "ai-selfhealing"
+  }
+}
+
+# AI Agent Access Entry
+resource "aws_eks_access_entry" "ai_agent" {
+  cluster_name      = module.eks.cluster_name
+  principal_arn     = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ai-self-healing-agent-role"
+  type              = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "ai_agent_admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ai-self-healing-agent-role"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
   }
 }
 
