@@ -31,12 +31,27 @@ module "rds" {
   private_subnets = module.vpc.private_subnets
 }
 
+module "iam" {
+  source       = "../../modules/iam"
+  cluster_name = module.eks.cluster_name
+  region       = "eu-north-1"
+}
+
+module "lambda_ai" {
+  source          = "../../modules/lambda"
+  lambda_role_arn = module.iam.ai_agent_role_arn
+}
+
 output "eks_cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
 
 output "rds_endpoint" {
   value = module.rds.db_endpoint
+}
+
+output "lambda_ai_url" {
+  value = module.lambda_ai.function_url
 }
 
 resource "aws_ecr_repository" "backend" {

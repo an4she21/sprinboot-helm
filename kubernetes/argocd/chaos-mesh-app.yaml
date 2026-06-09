@@ -8,7 +8,7 @@ spec:
   source:
     chart: chaos-mesh
     repoURL: https://charts.chaos-mesh.org
-    targetRevision: 2.6.1
+    targetRevision: 2.6.3
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: chaos-mesh
