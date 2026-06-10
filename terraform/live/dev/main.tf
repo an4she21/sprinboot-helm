@@ -12,6 +12,16 @@ provider "aws" {
   region = "eu-north-1"
 }
 
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate  = base64decode(module.eks.cluster_certificate_authority_data)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+  }
+}
+
 module "vpc" {
   source  = "../../modules/vpc"
   vpc_name = "ai-selfhealing-vpc-dev"
@@ -91,4 +101,19 @@ resource "aws_iam_policy" "ssm_read_policy" {
 resource "aws_iam_role_policy_attachment" "node_ssm_attach" {
   role       = "general-eks-node-group-20260607221902321300000002" # Using the role from the logs
   policy_arn = aws_iam_policy.ssm_read_policy.arn
+}
+
+resource "kubernetes_storage_class" "gp3" {
+  metadata {
+    name = "gp3"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+  storage_provisioner = "ebs.csi.aws.com"
+  reclaim_policy      = "Delete"
+  volume_binding_mode = "WaitForFirstConsumer"
+  parameters = {
+    type = "gp3"
+  }
 }

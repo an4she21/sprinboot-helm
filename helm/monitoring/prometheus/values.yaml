@@ -14,7 +14,7 @@ prometheus:
 
   alertmanager:
     enabled: true
-    persistentVolume:
+    persistence:
       enabled: false
 
   pushgateway:
