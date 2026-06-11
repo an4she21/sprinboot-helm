@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: test-memory-stress
+  namespace: ai-selfhealing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - ai-selfhealing
+    labelSelectors:
+      app: ai-selfhealing-app-backend
+  stressors:
+    memory:
+      workers: 1
+      size: "512MB"
+  duration: "2m"
