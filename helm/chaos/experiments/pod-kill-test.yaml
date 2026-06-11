@@ -1,0 +1,15 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-pod-kill
+  namespace: ai-selfhealing
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - ai-selfhealing
+    labelSelectors:
+      app: ai-selfhealing-app-backend
+  scheduler:
+    cron: "@every 5m"

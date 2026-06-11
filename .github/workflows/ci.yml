@@ -12,6 +12,7 @@ env:
   AWS_REGION: eu-north-1
   ECR_REPOSITORY_BACKEND: ai-selfhealing-backend
   ECR_REPOSITORY_FRONTEND: ai-selfhealing-frontend
+  ECR_REPOSITORY_AI_AGENT: ai-selfhealing-agent
 
 jobs:
   build-and-push:
@@ -36,7 +37,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       ##################################################
-      # Backend
+      # Backend (Spring Boot)
       ##################################################
 
       - name: Build Backend Image
@@ -96,3 +97,47 @@ jobs:
         run: |
           docker push $REGISTRY/$ECR_REPOSITORY_FRONTEND:$TAG
           docker push $REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
+
+      ##################################################
+      # AI Self-Healing Agent (ECS Fargate)
+      ##################################################
+
+      - name: Build AI Agent Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t $REGISTRY/$ECR_REPOSITORY_AI_AGENT:$TAG \
+            -t $REGISTRY/$ECR_REPOSITORY_AI_AGENT:latest \
+            -f src/ai-agent/Dockerfile ./src/ai-agent
+
+      - name: Scan AI Agent Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: image
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_AI_AGENT }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+
+      - name: Push AI Agent Image to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker push $REGISTRY/$ECR_REPOSITORY_AI_AGENT:$TAG
+          docker push $REGISTRY/$ECR_REPOSITORY_AI_AGENT:latest
+
+      ##################################################
+      # Force ECS redeployment with new image
+      ##################################################
+
+      - name: Deploy AI Agent to ECS
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          aws ecs update-service \
+            --cluster ai-selfhealing-agent-cluster \
+            --service ai-self-healing-agent \
+            --force-new-deployment \
+            --region $AWS_REGION
