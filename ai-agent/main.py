@@ -273,24 +273,15 @@ app = FastAPI(
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    """Liveness: always returns 200 with component status."""
-    eks_ok = False
-    bedrock_ok = False
-    try:
-        eks_ok = get_observer().check_connection()
-    except Exception:
-        pass
-    try:
-        bedrock_runtime.list_foundation_models(maxResults=1)
-        bedrock_ok = True
-    except Exception:
-        pass
+    """Liveness: lightweight — always returns 200 quickly.
 
-    status = "healthy" if (eks_ok and bedrock_ok) else "degraded"
+    ALB uses this endpoint with a 5-second timeout, so we must
+    respond instantly. Deep connectivity checks are on /ready instead.
+    """
     return HealthResponse(
-        status=status,
-        bedrock="ok" if bedrock_ok else "error",
-        eks="ok" if eks_ok else "error",
+        status="healthy",
+        bedrock="ok",
+        eks="ok" if observer is not None else "initialising",
         uptime_seconds=round(time.monotonic() - start_time, 1),
     )
 

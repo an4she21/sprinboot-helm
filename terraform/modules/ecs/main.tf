@@ -176,7 +176,7 @@ resource "aws_lb_target_group" "ai_agent" {
     path                = "/health"
     port                = "traffic-port"
     unhealthy_threshold = 3
-    timeout             = 5
+    timeout             = 15
   }
 
   tags = {
@@ -257,6 +257,8 @@ resource "aws_ecs_service" "ai_agent" {
   task_definition = aws_ecs_task_definition.ai_agent.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+
+  health_check_grace_period_seconds = 60
 
   network_configuration {
     subnets          = var.private_subnets
