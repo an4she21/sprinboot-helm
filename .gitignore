@@ -34,3 +34,28 @@ build/
 .claude/
 .terraform/
 .terraform/
+
+### Python AI Agent — prevent vendor packages in repo ###
+ai-agent/__pycache__/
+ai-agent/*.pyc
+ai-agent/*.so
+# Never commit pip --target vendor dirs
+ai-agent/aiohttp/
+ai-agent/boto3/
+ai-agent/botocore/
+ai-agent/kubernetes/
+ai-agent/certifi/
+ai-agent/charset_normalizer/
+ai-agent/requests/
+ai-agent/urllib3/
+ai-agent/idna/
+ai-agent/yaml/
+ai-agent/_yaml/
+ai-agent/dateutil/
+ai-agent/jmespath/
+ai-agent/s3transfer/
+ai-agent/oauthlib/
+ai-agent/websocket*
+ai-agent/*.dist-info/
+ai-agent/*.egg-info/
+

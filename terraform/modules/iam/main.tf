@@ -1,10 +1,26 @@
+# IAM Module — AI Agent & ECS Roles
+#
+# NOTE: We no longer use data.aws_eks_cluster here.
+# The OIDC provider URL is passed as a variable from the EKS module output
+# to avoid a circular dependency (IAM needs cluster info, cluster needs IAM).
+
 variable "cluster_name" { type = string }
 variable "region" { type = string }
 
-data "aws_caller_identity" "current" {}
-data "aws_eks_cluster" "cluster" {
-  name = var.cluster_name
+# --- NEW: OIDC info passed from EKS module instead of data source ---
+variable "oidc_provider_arn" {
+  description = "ARN of the EKS OIDC provider (from module.eks.oidc_provider_arn)"
+  type        = string
+  default     = ""
 }
+
+variable "oidc_provider_url" {
+  description = "URL of the EKS OIDC issuer (from module.eks.cluster_oidc_issuer_url)"
+  type        = string
+  default     = ""
+}
+
+data "aws_caller_identity" "current" {}
 
 ###############################################################################
 # External Secrets Operator Role
@@ -19,7 +35,12 @@ resource "aws_iam_role" "eso_role" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Effect = "Allow"
         Principal = {
-          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.aws_eks_cluster.cluster.name}.eks.${var.region}.amazonaws.com/ex"
+          Federated = var.oidc_provider_arn
+        }
+        Condition = {
+          StringEquals = {
+            "${replace(var.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:external-secrets:external-secrets"
+          }
         }
       }
     ]

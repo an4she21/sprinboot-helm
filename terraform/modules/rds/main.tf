@@ -69,7 +69,7 @@ resource "aws_db_instance" "this" {
 }
 
 resource "aws_secretsmanager_secret" "rds_password" {
-  name        = "ai-selfhealing-rds-password"
+  name        = "ai-selfhealing/db-password"
   description = "RDS root password for ai-selfhealing"
 
   tags = {
