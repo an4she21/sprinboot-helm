@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     path: helm/monitoring/prometheus
-    repoURL: https://github.com/anashe/aiplatform-springboot-helm # Assuming this is your repo
+    repoURL: https://github.com/an4she21/sprinboot-helm
     targetRevision: main
   destination:
     server: 'https://kubernetes.default.svc'
