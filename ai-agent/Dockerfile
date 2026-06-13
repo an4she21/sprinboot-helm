@@ -12,6 +12,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Patch OS-level vulnerabilities (OpenSSL, libssl, etc.)
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 # Security: non-root user
 RUN addgroup --system agent && adduser --system --ingroup agent agent
 
