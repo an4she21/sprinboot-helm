@@ -14,6 +14,9 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
+# Patch known vulnerabilities in base image (e.g. CVE-2026-45447 in OpenSSL)
+RUN apk upgrade --no-cache
+
 # Create a non-root user for security
 RUN addgroup -S spring && adduser -S spring -G spring
 USER spring:spring
