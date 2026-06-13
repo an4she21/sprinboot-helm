@@ -110,7 +110,7 @@ jobs:
           docker build \
             -t $REGISTRY/$ECR_REPOSITORY_AI_AGENT:$TAG \
             -t $REGISTRY/$ECR_REPOSITORY_AI_AGENT:latest \
-            -f src/ai-agent/Dockerfile ./src/ai-agent
+            -f ai-agent/Dockerfile ./ai-agent
 
       - name: Scan AI Agent Image with Trivy
         uses: aquasecurity/trivy-action@master
