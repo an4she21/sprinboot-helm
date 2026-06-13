@@ -25,12 +25,12 @@ module "eks" {
   # Managed Node Groups
   eks_managed_node_groups = {
     general = {
-      instance_types   = ["t3.medium"]
-      min_size         = 2
-      max_size         = 5
-      desired_capacity = 2
-      create_iam_role  = false
-      iam_role_arn     = "arn:aws:iam::181728646118:role/general-eks-node-group-20260607221902321300000002"
+      instance_types  = ["t3.small"]
+      min_size        = 1
+      max_size        = 5
+      desired_size    = 2
+      create_iam_role = false
+      iam_role_arn    = "arn:aws:iam::181728646118:role/general-eks-node-group-20260607221902321300000002"
     }
   }
 
