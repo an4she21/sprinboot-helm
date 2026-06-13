@@ -67,6 +67,23 @@ resource "aws_eks_access_policy_association" "ai_agent_admin" {
   }
 }
 
+# Admin IAM user access (for kubectl)
+resource "aws_eks_access_entry" "admin_user" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/project-eks"
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "admin_user_admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/project-eks"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}
+
 # EBS CSI Driver IAM Role
 resource "aws_iam_role" "ebs_csi_driver" {
   name = "${var.cluster_name}-ebs-csi-driver"
