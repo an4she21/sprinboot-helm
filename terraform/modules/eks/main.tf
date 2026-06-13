@@ -29,8 +29,12 @@ module "eks" {
       min_size        = 1
       max_size        = 5
       desired_size    = 2
-      create_iam_role = false
+      create_iam_role  = false
       iam_role_arn    = "arn:aws:iam::181728646118:role/general-eks-node-group-20260607221902321300000002"
+
+      # Prevent Terraform from drift-correcting desired_size back to 1
+      # We want scaling to 2 nodes without a full replacement
+      platform_version = null
     }
   }
 
