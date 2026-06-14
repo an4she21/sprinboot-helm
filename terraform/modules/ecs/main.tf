@@ -227,7 +227,7 @@ resource "aws_ecs_task_definition" "ai_agent" {
       ]
 
       environment = [
-        { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
+        { name = "BEDROCK_MODEL_ID", value = "anthropic.claude-haiku-4-5-20251001-v1:0" },
         { name = "AGENT_AWS_REGION", value = var.agent_region },
         { name = "EKS_CLUSTER_ENDPOINT", value = var.eks_cluster_endpoint },
         { name = "EKS_CLUSTER_CA", value = var.eks_cluster_ca },
