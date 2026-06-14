@@ -91,6 +91,7 @@ class K8sObserver:
             config = k8s_client.Configuration()
             config.host = self.cluster_endpoint
             config.api_key = {"authorization": f"Bearer {self._token}"}
+            config.timeout = 30  # 30s timeout for all K8s API calls
             if self._ssl_ca_file:
                 config.ssl_ca_cert = self._ssl_ca_file
                 config.verify_ssl = True
@@ -163,6 +164,7 @@ class K8sObserver:
         config = k8s_client.Configuration()
         config.host = self.cluster_endpoint
         config.api_key = {"authorization": f"Bearer {self._token}"}
+        config.timeout = 30  # 30s timeout for all K8s API calls
 
         if self.cluster_ca:
             ca_file = tempfile.NamedTemporaryFile(
@@ -397,10 +399,20 @@ class K8sObserver:
     # ------------------------------------------------------------------
 
     def check_connection(self) -> bool:
-        """Quick liveness check: can we reach the K8s API?"""
+        """Quick liveness check: can we reach the K8s API? (5s timeout)"""
         try:
             self._ensure_valid_token()
+            # Use a short timeout so we don't block health checks
+            old_timeout = k8s_client.Configuration.get_default_copy().timeout
+            config = k8s_client.Configuration.get_default_copy()
+            config.timeout = 5
+            k8s_client.Configuration.set_default(config)
+            self.core_v1 = k8s_client.CoreV1Api()
             self.core_v1.list_namespace(limit=1)
+            # Restore original timeout
+            config.timeout = old_timeout or 30
+            k8s_client.Configuration.set_default(config)
+            self.core_v1 = k8s_client.CoreV1Api()
             return True
         except Exception as exc:
             logger.warning("EKS connection check failed: %s", exc)

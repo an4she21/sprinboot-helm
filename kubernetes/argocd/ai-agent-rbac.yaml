@@ -16,7 +16,7 @@ metadata:
   name: ai-self-healing-agent-binding
 subjects:
 - kind: User
-  name: "arn:aws:iam::${ACCOUNT_ID}:role/ai-self-healing-agent-role" # This will be replaced or handled by the Access Entry
+  name: "arn:aws:iam::181728646118:role/ai-self-healing-agent-role"
 roleRef:
   kind: ClusterRole
   name: ai-self-healing-agent-role
