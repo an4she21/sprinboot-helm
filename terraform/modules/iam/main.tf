@@ -102,7 +102,8 @@ resource "aws_iam_role_policy" "ai_agent_policy" {
       {
         Sid    = "BedrockInvoke"
         Action = [
-          "bedrock:InvokeModel"
+          "bedrock:InvokeModel",
+          "bedrock:Converse"
         ]
         Effect   = "Allow"
         Resource = "arn:aws:bedrock:${var.region}::foundation-model/*"
