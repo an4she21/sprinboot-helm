@@ -45,8 +45,10 @@ module "eks" {
     }
   }
 
-  # Enable cluster endpoint access
-  cluster_endpoint_public_access = true
+  # Private-only endpoint: cluster DNS resolves to private IPs within VPC
+  # ECS AI Agent connects directly without NAT. kubectl from outside requires
+  # SSM Session Manager or VPN (see aws eks update-kubeconfig + SSM tunnel)
+  cluster_endpoint_public_access = false
 
   tags = {
     Environment = "dev"
@@ -134,4 +136,9 @@ output "cluster_oidc_issuer_url" {
 
 output "oidc_provider_arn" {
   value = module.eks.oidc_provider_arn
+}
+
+output "cluster_security_group_id" {
+  description = "EKS cluster security group ID (for cross-SG ingress rules)"
+  value       = module.eks.cluster_security_group_id
 }
