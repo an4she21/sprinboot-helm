@@ -51,15 +51,16 @@ module "iam" {
 
 # ── Module 5: ECS Fargate AI Agent ────────────────────────────────────────
 module "ecs_ai_agent" {
-  source                  = "../../modules/ecs"
-  cluster_name            = module.eks.cluster_name
-  vpc_id                  = module.vpc.vpc_id
-  private_subnets         = module.vpc.private_subnets
-  public_subnets          = module.vpc.public_subnets
-  eks_cluster_endpoint    = module.eks.cluster_endpoint
-  eks_cluster_ca          = module.eks.cluster_certificate_authority_data
-  task_execution_role_arn = module.iam.ecs_task_execution_role_arn
-  task_role_arn           = module.iam.ai_agent_role_arn
+  source                       = "../../modules/ecs"
+  cluster_name                 = module.eks.cluster_name
+  vpc_id                       = module.vpc.vpc_id
+  private_subnets              = module.vpc.private_subnets
+  public_subnets               = module.vpc.public_subnets
+  eks_cluster_endpoint         = module.eks.cluster_endpoint
+  eks_cluster_ca               = module.eks.cluster_certificate_authority_data
+  task_execution_role_arn      = module.iam.ecs_task_execution_role_arn
+  task_role_arn                = module.iam.ai_agent_role_arn
+  eks_cluster_security_group_id = module.eks.cluster_security_group_id
 }
 
 # ── ECR Repositories (with force_delete for clean terraform destroy) ──────

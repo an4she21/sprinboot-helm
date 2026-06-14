@@ -252,14 +252,33 @@ def execute_action(action_id: ActionId, alert: AlertDetail) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: initialise K8s observer. Shutdown: nothing special."""
+    """Startup: initialise K8s observer and start periodic EKS health check."""
+    import asyncio
+
     logger.info("AI Self-Healing Agent starting up...")
     try:
         get_observer()
         logger.info("K8s observer initialised successfully")
     except Exception as exc:
         logger.warning("K8s observer init failed (will retry on first webhook): %s", exc)
+
+    async def periodic_eks_check():
+        """Background task: test EKS connectivity every 60s and log result."""
+        await asyncio.sleep(15)  # wait for first token refresh
+        while True:
+            try:
+                connected = get_observer().check_connection()
+                if connected:
+                    logger.info("Periodic EKS check: CONNECTED ✓")
+                else:
+                    logger.warning("Periodic EKS check: FAILED — cannot reach EKS API")
+            except Exception as exc:
+                logger.warning("Periodic EKS check exception: %s", exc)
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(periodic_eks_check())
     yield
+    task.cancel()
     logger.info("AI Self-Healing Agent shutting down")
 
 

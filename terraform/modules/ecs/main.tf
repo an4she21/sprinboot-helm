@@ -42,6 +42,12 @@ variable "task_role_arn" {
   type = string
 }
 
+variable "eks_cluster_security_group_id" {
+  description = "EKS cluster security group ID — needed to allow ECS tasks to reach the K8s API"
+  type        = string
+  default     = ""
+}
+
 ###############################################################################
 # ECR Repository
 ###############################################################################
@@ -278,6 +284,22 @@ resource "aws_ecs_service" "ai_agent" {
     Environment = "dev"
     Project     = "ai-selfhealing"
   }
+}
+
+###############################################################################
+# Allow ECS tasks to reach EKS API server (private endpoint)
+###############################################################################
+resource "aws_security_group_rule" "ecs_to_eks_api" {
+  count = var.eks_cluster_security_group_id != "" ? 1 : 0
+
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.ecs_sg.id
+  security_group_id        = var.eks_cluster_security_group_id
+
+  description = "Allow ECS AI Agent to reach EKS API server"
 }
 
 ###############################################################################
