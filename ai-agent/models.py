@@ -82,7 +82,7 @@ class AlertmanagerPayload(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# AI Decision models (Bedrock response)
+# AI Decision models (NVIDIA NIM response)
 # ---------------------------------------------------------------------------
 
 class ActionId(str, Enum):
@@ -93,7 +93,7 @@ class ActionId(str, Enum):
 
 
 class AIDecision(BaseModel):
-    """Structured response expected from Bedrock (Claude)."""
+    """Structured response expected from NVIDIA NIM (GLM 5.1)."""
 
     analysis: str = Field(
         ..., description="Detailed reasoning for the chosen action"
@@ -138,7 +138,7 @@ class RemediationResult(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
-    bedrock: str = "unknown"
+    nim: str = "unknown"
     eks: str = "unknown"
     uptime_seconds: float = 0.0
 

@@ -72,6 +72,35 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
 }
 
+# Allow ECS execution role to read NIM API key from SSM Parameter Store
+resource "aws_iam_role_policy" "ecs_exec_ssm_read" {
+  name = "ecs-exec-ssm-read"
+  role = aws_iam_role.ecs_task_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "SSMReadNIMKey"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Effect   = "Allow"
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/ai-selfhealing/*"
+      },
+      {
+        Sid      = "KMSSSMDecrypt"
+        Action   = ["kms:Decrypt"]
+        Effect   = "Allow"
+        Resource = "arn:aws:kms:${var.region}:${data.aws_caller_identity.current.account_id}:key/*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 ###############################################################################
 # ECS Task Role (what the container can do at runtime)
 ###############################################################################
@@ -100,15 +129,6 @@ resource "aws_iam_role_policy" "ai_agent_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "BedrockInvoke"
-        Action = [
-          "bedrock:InvokeModel",
-          "bedrock:Converse"
-        ]
-        Effect   = "Allow"
-        Resource = "arn:aws:bedrock:${var.region}::foundation-model/*"
-      },
-      {
         Sid    = "EKSAccess"
         Action = [
           "eks:DescribeCluster",
@@ -124,6 +144,15 @@ resource "aws_iam_role_policy" "ai_agent_policy" {
         ]
         Effect   = "Allow"
         Resource = "*"
+      },
+      {
+        Sid    = "SSMReadNIMKey"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/ai-selfhealing/*"
       },
       {
         Sid    = "CloudWatchLogs"

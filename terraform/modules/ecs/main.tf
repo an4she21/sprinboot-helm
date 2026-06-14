@@ -3,6 +3,8 @@ variable "cluster_name" {
   type        = string
 }
 
+data "aws_caller_identity" "current" {}
+
 variable "vpc_id" {
   type = string
 }
@@ -22,11 +24,6 @@ variable "eks_cluster_endpoint" {
 variable "eks_cluster_ca" {
   type    = string
   default = ""
-}
-
-variable "bedrock_model_id" {
-  type    = string
-  default = "zai.glm-5"
 }
 
 variable "agent_region" {
@@ -227,12 +224,20 @@ resource "aws_ecs_task_definition" "ai_agent" {
       ]
 
       environment = [
-        { name = "BEDROCK_MODEL_ID", value = "zai.glm-5" },
+        { name = "NIM_MODEL", value = "nvidia_nim/z-ai/glm-5.1" },
+        { name = "NIM_BASE_URL", value = "https://integrate.api.nvidia.com/v1" },
         { name = "AGENT_AWS_REGION", value = var.agent_region },
         { name = "EKS_CLUSTER_ENDPOINT", value = var.eks_cluster_endpoint },
         { name = "EKS_CLUSTER_CA", value = var.eks_cluster_ca },
         { name = "CLUSTER_NAME", value = var.cluster_name },
         { name = "CONFIDENCE_THRESHOLD", value = "0.8" },
+      ]
+
+      secrets = [
+        {
+          name      = "NIM_API_KEY"
+          valueFrom = "arn:aws:ssm:${var.agent_region}:${data.aws_caller_identity.current.account_id}:parameter/ai-selfhealing/dev/nim-api-key"
+        }
       ]
 
       logConfiguration = {

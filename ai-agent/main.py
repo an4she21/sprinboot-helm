@@ -1,13 +1,14 @@
 """
 AI Self-Healing Agent — production FastAPI service.
 
-Receives Alertmanager webhooks, analyses alerts via AWS Bedrock (Claude),
+Receives Alertmanager webhooks, analyses alerts via NVIDIA NIM (GLM 5.1),
 and executes remediation actions on the EKS cluster.
 
 Key features:
+  • NVIDIA NIM API for AI decisions (GLM 5.1)
   • Auto-refreshing EKS STS tokens (no stale connections)
   • Cooldown / deduplication (prevents flip-flop remediation loops)
-  • Bedrock retry with exponential backoff
+  • Retry with exponential backoff
   • Input validation via Pydantic models
   • Structured JSON logging for CloudWatch
   • Health + readiness endpoints with real connectivity checks
@@ -18,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import boto3
+import httpx
 import uvicorn
 from cachetools import TTLCache
 from fastapi import FastAPI, Request
@@ -52,7 +53,9 @@ from models import (
 # Configuration
 # ---------------------------------------------------------------------------
 
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "zai.glm-5")
+NIM_API_KEY = os.environ.get("NIM_API_KEY", "")
+NIM_BASE_URL = os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_MODEL = os.environ.get("NIM_MODEL", "nvidia_nim/z-ai/glm-5.1")
 CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
 AGENT_AWS_REGION = os.environ.get("AGENT_AWS_REGION", "eu-north-1")
 SCALE_MAX_REPLICAS = int(os.environ.get("SCALE_MAX_REPLICAS", "5"))
@@ -88,11 +91,10 @@ logger = logging.getLogger("ai-agent")
 # State
 # ---------------------------------------------------------------------------
 
-bedrock_runtime = boto3.client("bedrock-runtime", region_name=AGENT_AWS_REGION)
 observer: Optional[K8sObserver] = None
 start_time = time.monotonic()
 
-# Cooldown cache: key → timestamp of last action
+# Cooldown cache: key -> timestamp of last action
 # TTL = COOLDOWN_SECONDS so entries auto-expire
 cooldown_cache: TTLCache = TTLCache(maxsize=1024, ttl=COOLDOWN_SECONDS)
 
@@ -109,10 +111,10 @@ def get_observer() -> K8sObserver:
 
 
 # ---------------------------------------------------------------------------
-# Bedrock AI brain
+# NVIDIA NIM AI brain
 # ---------------------------------------------------------------------------
 
-BEDROCK_PROMPT_TEMPLATE = """You are a Kubernetes SRE Expert. Analyze the following cluster state snapshot and determine the best remediation action.
+AI_PROMPT_TEMPLATE = """You are a Kubernetes SRE Expert. Analyze the following cluster state snapshot and determine the best remediation action.
 
 ALERT CONTEXT:
 - Alert Name: {alertname}
@@ -143,31 +145,33 @@ Return ONLY a JSON response with this exact structure:
 }}"""
 
 
-def _is_bedrock_retryable(exc: BaseException) -> bool:
-    """Return True for Bedrock exceptions worth retrying."""
+def _is_nim_retryable(exc: BaseException) -> bool:
+    """Return True for NIM API exceptions worth retrying."""
     exc_name = type(exc).__name__
     return exc_name in (
-        "ThrottlingException",
-        "ServiceUnavailable",
+        "ConnectError",
         "ReadTimeout",
+        "ConnectTimeout",
+        "HTTPStatusError",
         "ConnectionError",
-        "InternalServerError",
     )
 
 
 @retry(
-    retry=retry_if_exception(_is_bedrock_retryable),
+    retry=retry_if_exception(_is_nim_retryable),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=2, max=30),
     reraise=True,
 )
 def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
-    """Call AWS Bedrock to analyse the alert and decide an action.
+    """Call NVIDIA NIM API (GLM 5.1) to analyse the alert and decide an action.
 
-    Uses the Converse API which works with any Bedrock model
-    (GLM, Claude, Nova, etc.) through a unified request format.
+    Uses the OpenAI-compatible chat completions endpoint.
     """
-    prompt = BEDROCK_PROMPT_TEMPLATE.format(
+    if not NIM_API_KEY:
+        raise RuntimeError("NIM_API_KEY is not set")
+
+    prompt = AI_PROMPT_TEMPLATE.format(
         alertname=alert.alertname,
         severity=alert.severity,
         alert_status=alert.status.value,
@@ -175,21 +179,29 @@ def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
         max_replicas=SCALE_MAX_REPLICAS,
     )
 
-    response = bedrock_runtime.converse(
-        modelId=BEDROCK_MODEL_ID,
-        messages=[
+    url = f"{NIM_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {NIM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": NIM_MODEL,
+        "messages": [
             {
                 "role": "user",
-                "content": [{"text": prompt}],
+                "content": prompt,
             }
         ],
-        inferenceConfig={
-            "maxTokens": 600,
-            "temperature": 0.3,
-        },
-    )
+        "max_tokens": 600,
+        "temperature": 0.3,
+    }
 
-    raw_text = response["output"]["message"]["content"][0]["text"]
+    with httpx.Client(timeout=60) as client:
+        response = client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+
+    result = response.json()
+    raw_text = result["choices"][0]["message"]["content"]
 
     # Parse the JSON from the model response
     raw_text = raw_text.strip()
@@ -200,20 +212,24 @@ def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
         raw_text = raw_text.strip()
 
     decision_data = json.loads(raw_text)
+    logger.info(
+        "NIM API response received (model=%s)", NIM_MODEL,
+        extra={"correlation_id": alert.resource_key},
+    )
     return AIDecision(**decision_data)
 
 
 def invoke_brain_safe(snapshot: dict, alert: AlertDetail) -> AIDecision:
-    """Call Bedrock with retry + fallback to MANUAL on total failure."""
+    """Call NIM API with retry + fallback to MANUAL on total failure."""
     try:
         return invoke_brain(snapshot, alert)
     except Exception as exc:
         logger.error(
-            "Bedrock call failed after retries, falling back to MANUAL",
+            "NIM API call failed after retries, falling back to MANUAL",
             extra={"correlation_id": alert.resource_key, "exception": str(exc)},
         )
         return AIDecision(
-            analysis=f"Bedrock call failed: {exc}. Escalating to human.",
+            analysis=f"AI call failed: {exc}. Escalating to human.",
             action_id=ActionId.MANUAL,
             confidence=0.0,
         )
@@ -245,10 +261,10 @@ def execute_action(action_id: ActionId, alert: AlertDetail) -> str:
             json.dumps(events[:5], default=str),
             extra={"correlation_id": alert.resource_key},
         )
-        return f"Investigated {deploy} in {ns} — no automated action taken, events logged"
+        return f"Investigated {deploy} in {ns} - no automated action taken, events logged"
 
     # MANUAL — no action
-    return "Manual intervention required — no automated action taken."
+    return "Manual intervention required - no automated action taken."
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +276,7 @@ async def lifespan(app: FastAPI):
     """Startup: initialise K8s observer and start periodic EKS health check."""
     import asyncio
 
-    logger.info("AI Self-Healing Agent starting up...")
+    logger.info("AI Self-Healing Agent starting up (model=%s)...", NIM_MODEL)
     try:
         get_observer()
         logger.info("K8s observer initialised successfully")
@@ -274,9 +290,9 @@ async def lifespan(app: FastAPI):
             try:
                 connected = get_observer().check_connection()
                 if connected:
-                    logger.info("Periodic EKS check: CONNECTED ✓")
+                    logger.info("Periodic EKS check: CONNECTED")
                 else:
-                    logger.warning("Periodic EKS check: FAILED — cannot reach EKS API")
+                    logger.warning("Periodic EKS check: FAILED - cannot reach EKS API")
             except Exception as exc:
                 logger.warning("Periodic EKS check exception: %s", exc)
             await asyncio.sleep(60)
@@ -289,22 +305,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Self-Healing Agent",
-    version="2.0.0",
-    description="Receives Alertmanager webhooks, analyses via AWS Bedrock, and remediates EKS issues",
+    version="3.0.0",
+    description="Receives Alertmanager webhooks, analyses via NVIDIA NIM, and remediates EKS issues",
     lifespan=lifespan,
 )
 
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    """Liveness: lightweight — always returns 200 quickly.
+    """Liveness: lightweight - always returns 200 quickly.
 
     ALB uses this endpoint with a 5-second timeout, so we must
     respond instantly. Deep connectivity checks are on /ready instead.
     """
     return HealthResponse(
         status="healthy",
-        bedrock="ok",
+        nim="ok",
         eks="ok" if observer is not None else "initialising",
         uptime_seconds=round(time.monotonic() - start_time, 1),
     )
@@ -365,7 +381,7 @@ async def alertmanager_webhook(request: Request):
             last_action_time = cooldown_cache[key]
             remaining = int(COOLDOWN_SECONDS - (now - last_action_time))
             logger.warning(
-                "Cooldown active for %s — skipping (%ds remaining)",
+                "Cooldown active for %s - skipping (%ds remaining)",
                 key, remaining,
                 extra={"correlation_id": cid},
             )
