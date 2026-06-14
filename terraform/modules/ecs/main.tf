@@ -224,7 +224,7 @@ resource "aws_ecs_task_definition" "ai_agent" {
       ]
 
       environment = [
-        { name = "NIM_MODEL", value = "nvidia_nim/z-ai/glm-5.1" },
+        { name = "NIM_MODEL", value = "z-ai/glm-5.1" },
         { name = "NIM_BASE_URL", value = "https://integrate.api.nvidia.com/v1" },
         { name = "AGENT_AWS_REGION", value = var.agent_region },
         { name = "EKS_CLUSTER_ENDPOINT", value = var.eks_cluster_endpoint },

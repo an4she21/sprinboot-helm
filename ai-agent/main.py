@@ -55,7 +55,7 @@ from models import (
 
 NIM_API_KEY = os.environ.get("NIM_API_KEY", "")
 NIM_BASE_URL = os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NIM_MODEL = os.environ.get("NIM_MODEL", "nvidia_nim/z-ai/glm-5.1")
+NIM_MODEL = os.environ.get("NIM_MODEL", "z-ai/glm-5.1")
 CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
 AGENT_AWS_REGION = os.environ.get("AGENT_AWS_REGION", "eu-north-1")
 SCALE_MAX_REPLICAS = int(os.environ.get("SCALE_MAX_REPLICAS", "5"))
