@@ -52,7 +52,7 @@ from models import (
 # Configuration
 # ---------------------------------------------------------------------------
 
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-20251001-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "zai.glm-5")
 CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
 AGENT_AWS_REGION = os.environ.get("AGENT_AWS_REGION", "eu-north-1")
 SCALE_MAX_REPLICAS = int(os.environ.get("SCALE_MAX_REPLICAS", "5"))
@@ -162,7 +162,11 @@ def _is_bedrock_retryable(exc: BaseException) -> bool:
     reraise=True,
 )
 def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
-    """Call AWS Bedrock (Claude) to analyse the alert and decide an action."""
+    """Call AWS Bedrock to analyse the alert and decide an action.
+
+    Uses the Converse API which works with any Bedrock model
+    (GLM, Claude, Nova, etc.) through a unified request format.
+    """
     prompt = BEDROCK_PROMPT_TEMPLATE.format(
         alertname=alert.alertname,
         severity=alert.severity,
@@ -171,22 +175,23 @@ def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
         max_replicas=SCALE_MAX_REPLICAS,
     )
 
-    body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 600,
-        "messages": [{"role": "user", "content": prompt}],
-    })
-
-    response = bedrock_runtime.invoke_model(
+    response = bedrock_runtime.converse(
         modelId=BEDROCK_MODEL_ID,
-        body=body,
+        messages=[
+            {
+                "role": "user",
+                "content": [{"text": prompt}],
+            }
+        ],
+        inferenceConfig={
+            "maxTokens": 600,
+            "temperature": 0.3,
+        },
     )
 
-    result = json.loads(response["body"].read())
-    raw_text = result["content"][0]["text"]
+    raw_text = response["output"]["message"]["content"][0]["text"]
 
-    # Parse the JSON from Claude's response
-    # Sometimes Claude wraps it in markdown code blocks — strip those
+    # Parse the JSON from the model response
     raw_text = raw_text.strip()
     if raw_text.startswith("```"):
         raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]

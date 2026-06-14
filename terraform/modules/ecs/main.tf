@@ -26,7 +26,7 @@ variable "eks_cluster_ca" {
 
 variable "bedrock_model_id" {
   type    = string
-  default = "anthropic.claude-3-sonnet-20240229-v1:0"
+  default = "zai.glm-5"
 }
 
 variable "agent_region" {
@@ -227,7 +227,7 @@ resource "aws_ecs_task_definition" "ai_agent" {
       ]
 
       environment = [
-        { name = "BEDROCK_MODEL_ID", value = "anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { name = "BEDROCK_MODEL_ID", value = "zai.glm-5" },
         { name = "AGENT_AWS_REGION", value = var.agent_region },
         { name = "EKS_CLUSTER_ENDPOINT", value = var.eks_cluster_endpoint },
         { name = "EKS_CLUSTER_CA", value = var.eks_cluster_ca },

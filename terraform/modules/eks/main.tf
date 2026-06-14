@@ -45,10 +45,11 @@ module "eks" {
     }
   }
 
-  # Private-only endpoint: cluster DNS resolves to private IPs within VPC
-  # ECS AI Agent connects directly without NAT. kubectl from outside requires
-  # SSM Session Manager or VPN (see aws eks update-kubeconfig + SSM tunnel)
-  cluster_endpoint_public_access = false
+  # Public endpoint enabled but restricted to specific CIDRs only.
+  # ECS AI Agent connects via private IPs (endpointPrivateAccess=true).
+  # kubectl from your IP only — all other IPs are blocked.
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_public_access_cidrs = ["196.64.134.114/32"]
 
   tags = {
     Environment = "dev"
