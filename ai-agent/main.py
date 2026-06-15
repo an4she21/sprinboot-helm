@@ -243,21 +243,31 @@ Return ONLY a JSON response with this exact structure:
 
 
 def _is_nim_retryable(exc: BaseException) -> bool:
-    """Return True for NIM API exceptions worth retrying."""
+    """Return True for NIM API exceptions worth retrying.
+
+    HTTP 429 (rate-limit) is retryable — NIM API has burst limits;
+    waiting and re-sending usually succeeds.
+    """
     exc_name = type(exc).__name__
-    return exc_name in (
+    # Generic network / timeout exceptions
+    if exc_name in (
         "ConnectError",
         "ReadTimeout",
         "ConnectTimeout",
-        "HTTPStatusError",
         "ConnectionError",
-    )
+    ):
+        return True
+    # HTTP errors — retry on 429 rate-limit and 5xx server errors
+    if exc_name == "HTTPStatusError":
+        code = getattr(getattr(exc, "response", None), "status_code", 0)
+        return code == 429 or code >= 500
+    return False
 
 
 @retry(
     retry=retry_if_exception(_is_nim_retryable),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=4, max=60),
     reraise=True,
 )
 def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
