@@ -45,11 +45,10 @@ module "eks" {
     }
   }
 
-  # Public endpoint enabled but restricted to specific CIDRs only.
+  # Public endpoint open for dev/test — no IP restriction.
   # ECS AI Agent connects via private IPs (endpointPrivateAccess=true).
-  # kubectl from your IP only — all other IPs are blocked.
   cluster_endpoint_public_access  = true
-  cluster_endpoint_public_access_cidrs = ["196.64.134.114/32"]
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
   tags = {
     Environment = "dev"
