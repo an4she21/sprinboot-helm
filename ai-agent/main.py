@@ -1,18 +1,20 @@
 """
-AI Self-Healing Agent — production FastAPI service.
+AI Self-Healing Agent -- production FastAPI service.
 
 Receives Alertmanager webhooks, analyses alerts via NVIDIA NIM (GLM 5.1),
-and executes remediation actions on the EKS cluster.
+executes remediation actions on the EKS cluster, and sends email reports.
 
 Key features:
-  • NVIDIA NIM API for AI decisions (GLM 5.1)
-  • Auto-refreshing EKS STS tokens (no stale connections)
-  • Cooldown / deduplication (prevents flip-flop remediation loops)
-  • Retry with exponential backoff
-  • Input validation via Pydantic models
-  • Structured JSON logging for CloudWatch
-  • Health + readiness endpoints with real connectivity checks
-  • Web dashboard + remediation history for observability
+  - NVIDIA NIM API for AI decisions (GLM 5.1)
+  - Auto-refreshing EKS STS tokens (no stale connections)
+  - Cooldown / deduplication (prevents flip-flop remediation loops)
+  - Retry with exponential backoff
+  - Input validation via Pydantic models
+  - Structured JSON logging for CloudWatch
+  - Health + readiness endpoints with real connectivity checks
+  - Prometheus /metrics endpoint for Grafana dashboards
+  - SNS email reports after every remediation
+  - Web dashboard + remediation history for observability
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ import httpx
 import uvicorn
 from cachetools import TTLCache
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from tenacity import (
     retry,
     retry_if_exception,
@@ -64,6 +66,7 @@ SCALE_MAX_REPLICAS = int(os.environ.get("SCALE_MAX_REPLICAS", "5"))
 COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "300"))  # 5 min
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 HISTORY_MAX = int(os.environ.get("HISTORY_MAX", "100"))
+SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -91,6 +94,13 @@ logger = logging.getLogger("ai-agent")
 
 
 # ---------------------------------------------------------------------------
+# AWS clients
+# ---------------------------------------------------------------------------
+
+sns_client = boto3.client("sns", region_name=AGENT_AWS_REGION)
+
+
+# ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
 
@@ -101,8 +111,21 @@ start_time = time.monotonic()
 # TTL = COOLDOWN_SECONDS so entries auto-expire
 cooldown_cache: TTLCache = TTLCache(maxsize=1024, ttl=COOLDOWN_SECONDS)
 
-# Simple counters for health endpoint
+# Counters for stats/metrics
 stats = {"alerts_processed": 0, "actions_taken": 0, "actions_skipped": 0}
+
+# Prometheus-style metrics (accumulators)
+metrics_state = {
+    "nim_api_calls_total": 0,
+    "nim_api_failures_total": 0,
+    "nim_api_latency_seconds_sum": 0.0,
+    "nim_api_latency_seconds_count": 0,
+    "eks_restarts_total": 0,
+    "eks_scale_ups_total": 0,
+    "eks_investigates_total": 0,
+    "manual_escalations_total": 0,
+    "cooldown_skips_total": 0,
+}
 
 # Remediation history (capped ring buffer)
 remediation_history: deque = deque(maxlen=HISTORY_MAX)
@@ -114,6 +137,74 @@ def get_observer() -> K8sObserver:
     if observer is None:
         observer = K8sObserver()
     return observer
+
+
+# ---------------------------------------------------------------------------
+# SNS email reports
+# ---------------------------------------------------------------------------
+
+def send_remediation_report(result: RemediationResult, decision: AIDecision) -> None:
+    """Send an SNS email report after remediation with full details."""
+    if not SNS_TOPIC_ARN:
+        logger.info("SNS_TOPIC_ARN not set - skipping email report")
+        return
+
+    # Emoji based on action
+    action_emoji = {
+        "RESTART_POD": "⚡",
+        "SCALE_UP": "\U0001f4c8",
+        "INVESTIGATE": "\U0001f50d",
+        "MANUAL": "⚠",
+        "SKIP": "⏸",
+    }
+    emoji = action_emoji.get(result.action, "❓")
+
+    # Status emoji
+    status_emoji = "✅" if result.action in ("RESTART_POD", "SCALE_UP", "INVESTIGATE") and not result.skipped else "⏸" if result.skipped else "⚠️"
+
+    subject = f"[AI-SELF-HEALING] {result.alertname} -> {result.action} {status_emoji}"
+
+    conf_pct = int(result.confidence * 100)
+    uptime = round(time.monotonic() - start_time, 0)
+    uptime_h = int(uptime // 3600)
+    uptime_m = int((uptime % 3600) // 60)
+
+    body = f"""{'=' * 55}
+  AI Self-Healing Agent -- Remediation Report
+{'=' * 55}
+
+{emoji} ALERT: {result.alertname}
+   Pod:        {result.pod}
+   Namespace:  {result.namespace}
+   Deployment: {result.deployment}
+   Severity:   {result.severity if hasattr(result, 'severity') else 'N/A'}
+   Time:       {result.timestamp}
+
+{emoji} AI ANALYSIS (GLM 5.1 -- confidence: {conf_pct}%):
+   {decision.analysis}
+
+{emoji} ACTION: {result.action}
+   {result.result}
+
+{'=' * 55}
+Correlation ID: {result.correlation_id}
+Agent uptime:   {uptime_h}h {uptime_m}m
+{'=' * 55}
+"""
+
+    try:
+        sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Subject=subject[:100],
+            Message=body,
+        )
+        logger.info(
+            "SNS report sent for %s/%s",
+            result.namespace, result.deployment,
+            extra={"correlation_id": result.correlation_id},
+        )
+    except Exception as exc:
+        logger.error("SNS publish failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -202,9 +293,16 @@ def invoke_brain(snapshot: dict, alert: AlertDetail) -> AIDecision:
         "temperature": 0.3,
     }
 
+    t0 = time.monotonic()
     with httpx.Client(timeout=60) as client:
         response = client.post(url, headers=headers, json=payload)
         response.raise_for_status()
+    latency = time.monotonic() - t0
+
+    # Track Prometheus metrics
+    metrics_state["nim_api_calls_total"] += 1
+    metrics_state["nim_api_latency_seconds_sum"] += latency
+    metrics_state["nim_api_latency_seconds_count"] += 1
 
     result = response.json()
     raw_text = result["choices"][0]["message"]["content"]
@@ -230,6 +328,7 @@ def invoke_brain_safe(snapshot: dict, alert: AlertDetail) -> AIDecision:
     try:
         return invoke_brain(snapshot, alert)
     except Exception as exc:
+        metrics_state["nim_api_failures_total"] += 1
         logger.error(
             "NIM API call failed after retries, falling back to MANUAL",
             extra={"correlation_id": alert.resource_key, "exception": str(exc)},
@@ -252,15 +351,17 @@ def execute_action(action_id: ActionId, alert: AlertDetail) -> str:
     deploy = alert.deployment
 
     if action_id == ActionId.RESTART_POD:
+        metrics_state["eks_restarts_total"] += 1
         return obs.restart_deployment(namespace=ns, deployment_name=deploy)
 
     elif action_id == ActionId.SCALE_UP:
+        metrics_state["eks_scale_ups_total"] += 1
         return obs.scale_deployment(
             namespace=ns, deployment_name=deploy, max_replicas=SCALE_MAX_REPLICAS
         )
 
     elif action_id == ActionId.INVESTIGATE:
-        # No action — just log the deep context we already gathered
+        metrics_state["eks_investigates_total"] += 1
         events = obs.get_namespace_events(namespace=ns)
         logger.info(
             "INVESTIGATE: No automated action. Namespace events: %s",
@@ -269,8 +370,104 @@ def execute_action(action_id: ActionId, alert: AlertDetail) -> str:
         )
         return f"Investigated {deploy} in {ns} - no automated action taken, events logged"
 
-    # MANUAL — no action
+    # MANUAL -- no action
+    metrics_state["manual_escalations_total"] += 1
     return "Manual intervention required - no automated action taken."
+
+
+# ---------------------------------------------------------------------------
+# Prometheus /metrics endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics():
+    """Prometheus-compatible metrics endpoint for Grafana dashboards."""
+    uptime = round(time.monotonic() - start_time, 1)
+    now_ts = time.time()
+
+    # Check EKS connection for gauge
+    try:
+        eks_connected = 1 if get_observer().check_connection() else 0
+    except Exception:
+        eks_connected = 0
+
+    # Average NIM latency
+    avg_latency = (
+        metrics_state["nim_api_latency_seconds_sum"]
+        / metrics_state["nim_api_latency_seconds_count"]
+        if metrics_state["nim_api_latency_seconds_count"] > 0
+        else 0.0
+    )
+
+    lines = [
+        "# HELP ai_agent_alerts_processed_total Total alerts processed",
+        "# TYPE ai_agent_alerts_processed_total counter",
+        f'ai_agent_alerts_processed_total {stats["alerts_processed"]}',
+        "",
+        "# HELP ai_agent_actions_taken_total Total remediation actions executed",
+        "# TYPE ai_agent_actions_taken_total counter",
+        f'ai_agent_actions_taken_total {stats["actions_taken"]}',
+        "",
+        "# HELP ai_agent_actions_skipped_total Total actions skipped (cooldown/low confidence)",
+        "# TYPE ai_agent_actions_skipped_total counter",
+        f'ai_agent_actions_skipped_total {stats["actions_skipped"]}',
+        "",
+        "# HELP ai_agent_eks_connected Whether AI Agent is connected to EKS (1=yes 0=no)",
+        "# TYPE ai_agent_eks_connected gauge",
+        f"ai_agent_eks_connected {eks_connected}",
+        "",
+        "# HELP ai_agent_uptime_seconds Agent uptime in seconds",
+        "# TYPE ai_agent_uptime_seconds gauge",
+        f"ai_agent_uptime_seconds {uptime}",
+        "",
+        "# HELP ai_agent_nim_api_calls_total Total NVIDIA NIM API calls",
+        "# TYPE ai_agent_nim_api_calls_total counter",
+        f'ai_agent_nim_api_calls_total {metrics_state["nim_api_calls_total"]}',
+        "",
+        "# HELP ai_agent_nim_api_failures_total Total NVIDIA NIM API call failures",
+        "# TYPE ai_agent_nim_api_failures_total counter",
+        f'ai_agent_nim_api_failures_total {metrics_state["nim_api_failures_total"]}',
+        "",
+        "# HELP ai_agent_nim_api_latency_avg_seconds Average NIM API latency in seconds",
+        "# TYPE ai_agent_nim_api_latency_avg_seconds gauge",
+        f"ai_agent_nim_api_latency_avg_seconds {round(avg_latency, 3)}",
+        "",
+        "# HELP ai_agent_eks_restarts_total Total RESTART_POD actions executed",
+        "# TYPE ai_agent_eks_restarts_total counter",
+        f'ai_agent_eks_restarts_total {metrics_state["eks_restarts_total"]}',
+        "",
+        "# HELP ai_agent_eks_scale_ups_total Total SCALE_UP actions executed",
+        "# TYPE ai_agent_eks_scale_ups_total counter",
+        f'ai_agent_eks_scale_ups_total {metrics_state["eks_scale_ups_total"]}',
+        "",
+        "# HELP ai_agent_eks_investigates_total Total INVESTIGATE actions executed",
+        "# TYPE ai_agent_eks_investigates_total counter",
+        f'ai_agent_eks_investigates_total {metrics_state["eks_investigates_total"]}',
+        "",
+        "# HELP ai_agent_manual_escalations_total Total MANUAL escalations",
+        "# TYPE ai_agent_manual_escalations_total counter",
+        f'ai_agent_manual_escalations_total {metrics_state["manual_escalations_total"]}',
+        "",
+        "# HELP ai_agent_cooldown_skips_total Total alerts skipped due to cooldown",
+        "# TYPE ai_agent_cooldown_skips_total counter",
+        f'ai_agent_cooldown_skips_total {metrics_state["cooldown_skips_total"]}',
+        "",
+        "# HELP ai_agent_cooldown_cache_size Number of active cooldown entries",
+        "# TYPE ai_agent_cooldown_cache_size gauge",
+        f"ai_agent_cooldown_cache_size {len(cooldown_cache)}",
+    ]
+
+    # Per-confidence from history
+    if remediation_history:
+        latest = remediation_history[-1]
+        lines.extend([
+            "",
+            "# HELP ai_agent_last_confidence_score Confidence score of the last remediation decision",
+            "# TYPE ai_agent_last_confidence_score gauge",
+            f"ai_agent_last_confidence_score {latest.get('confidence', 0.0)}",
+        ])
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -339,18 +536,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <div class="grid" id="stats-grid">
-  <div class="stat-card"><div class="label">Alerts Processed</div><div class="value green" id="v-processed">—</div></div>
-  <div class="stat-card"><div class="label">Actions Taken</div><div class="value blue" id="v-taken">—</div></div>
-  <div class="stat-card"><div class="label">Actions Skipped</div><div class="value yellow" id="v-skipped">—</div></div>
-  <div class="stat-card"><div class="label">Uptime</div><div class="value purple" id="v-uptime">—</div></div>
-  <div class="stat-card"><div class="label">EKS Connection</div><div class="value green" id="v-eks">—</div></div>
-  <div class="stat-card"><div class="label">AI Model</div><div class="value" id="v-model" style="font-size:16px;">—</div></div>
+  <div class="stat-card"><div class="label">Alerts Processed</div><div class="value green" id="v-processed">&mdash;</div></div>
+  <div class="stat-card"><div class="label">Actions Taken</div><div class="value blue" id="v-taken">&mdash;</div></div>
+  <div class="stat-card"><div class="label">Actions Skipped</div><div class="value yellow" id="v-skipped">&mdash;</div></div>
+  <div class="stat-card"><div class="label">Uptime</div><div class="value purple" id="v-uptime">&mdash;</div></div>
+  <div class="stat-card"><div class="label">EKS Connection</div><div class="value green" id="v-eks">&mdash;</div></div>
+  <div class="stat-card"><div class="label">AI Model</div><div class="value" id="v-model" style="font-size:16px;">&mdash;</div></div>
 </div>
 
 <div class="section-title">
   <span class="dot" style="background:var(--blue);"></span>
   Remediation History
-  <span class="refresh-info"><a href="/history">JSON</a> &middot; <a href="/stats">Stats API</a></span>
+  <span class="refresh-info"><a href="/history">JSON</a> &middot; <a href="/metrics">Prometheus</a></span>
 </div>
 
 <div class="timeline" id="timeline">
@@ -358,7 +555,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div>Time</div><div>Alert</div><div>Deployment</div><div>Action</div><div>AI Analysis</div><div>Confidence</div>
   </div>
   <div id="timeline-rows">
-    <div class="empty-state">No remediation events yet — waiting for alerts...</div>
+    <div class="empty-state">No remediation events yet -- waiting for alerts...</div>
   </div>
 </div>
 
@@ -368,7 +565,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <script>
 const fmt = s => {
-  if (!s) return '—';
+  if (!s) return '--';
   const d = new Date(s);
   return d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 };
@@ -403,22 +600,22 @@ async function refresh() {
 
     const rows = document.getElementById('timeline-rows');
     if (!hi.length) {
-      rows.innerHTML = '<div class="empty-state">No remediation events yet — waiting for alerts...</div>';
+      rows.innerHTML = '<div class="empty-state">No remediation events yet -- waiting for alerts...</div>';
     } else {
       rows.innerHTML = hi.slice().reverse().map(e => {
         const confClass = e.confidence >= 0.8 ? 'conf-high' : e.confidence >= 0.5 ? 'conf-mid' : 'conf-low';
         const pct = Math.round(e.confidence * 100);
-        return `<div class="timeline-row">
-          <div style="color:var(--text2);font-size:13px;">${fmt(e.timestamp)}</div>
-          <div style="font-weight:600;">${e.alertname}</div>
-          <div><span style="color:var(--text2);">${e.namespace}/</span>${e.deployment}</div>
-          <div><span class="action-badge action-${e.action}">${e.action}</span></div>
-          <div style="font-size:13px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px;" title="${(e.analysis||'').replace(/"/g,'"')}">${e.analysis || e.result || '—'}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="conf-bar"><div class="conf-bar-fill ${confClass}" style="width:${pct}%;"></div></div>
-            <span style="font-size:13px;">${pct}%</span>
-          </div>
-        </div>`;
+        return '<div class="timeline-row">' +
+          '<div style="color:var(--text2);font-size:13px;">' + fmt(e.timestamp) + '</div>' +
+          '<div style="font-weight:600;">' + e.alertname + '</div>' +
+          '<div><span style="color:var(--text2);">' + e.namespace + '/</span>' + e.deployment + '</div>' +
+          '<div><span class="action-badge action-' + e.action + '">' + e.action + '</span></div>' +
+          '<div style="font-size:13px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px;" title="' + (e.analysis||'').replace(/"/g,'') + '">' + (e.analysis || e.result || '--') + '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<div class="conf-bar"><div class="conf-bar-fill ' + confClass + '" style="width:' + pct + '%;"></div></div>' +
+            '<span style="font-size:13px;">' + pct + '%</span>' +
+          '</div>' +
+        '</div>';
       }).join('');
     }
   } catch(err) {
@@ -472,7 +669,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Self-Healing Agent",
     version="3.0.0",
-    description="Receives Alertmanager webhooks, analyses via NVIDIA NIM, and remediates EKS issues",
+    description="Receives Alertmanager webhooks, analyses via NVIDIA NIM, remediates EKS issues, and sends email reports",
     lifespan=lifespan,
 )
 
@@ -521,7 +718,7 @@ def get_history():
 
 @app.post("/webhook")
 async def alertmanager_webhook(request: Request):
-    """Main webhook: receive Alertmanager payload, analyse, remediate."""
+    """Main webhook: receive Alertmanager payload, analyse, remediate, report."""
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(
         "Webhook received", extra={"correlation_id": correlation_id}
@@ -564,6 +761,7 @@ async def alertmanager_webhook(request: Request):
                 extra={"correlation_id": cid},
             )
             stats["actions_skipped"] += 1
+            metrics_state["cooldown_skips_total"] += 1
             result_entry = RemediationResult(
                 pod=alert.pod,
                 namespace=alert.namespace,
@@ -578,6 +776,12 @@ async def alertmanager_webhook(request: Request):
             )
             results.append(result_entry.model_dump())
             remediation_history.append(result_entry.model_dump())
+            # Send email even for cooldown (info report)
+            send_remediation_report(result_entry, AIDecision(
+                analysis=f"Skipped due to cooldown ({remaining}s remaining)",
+                action_id=ActionId.MANUAL,
+                confidence=0.0,
+            ))
             continue
 
         # ---- Gather context ----
@@ -632,6 +836,9 @@ async def alertmanager_webhook(request: Request):
         )
         results.append(result_entry.model_dump())
         remediation_history.append(result_entry.model_dump())
+
+        # ---- Send email report ----
+        send_remediation_report(result_entry, decision)
 
     return {"status": "processed", "details": results, "stats": stats}
 

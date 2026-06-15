@@ -42,6 +42,16 @@ prometheus:
     enabled: false
 
   serverFiles:
+    # Prometheus scrape config + AI Agent metrics job
+    prometheus.yml:
+      scrape_configs:
+        - job_name: ai-agent
+          scrape_interval: 30s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ['ai-agent.ai-selfhealing.internal']
+
+    # Alerting rules for EKS pod health
     alerting_rules.yml:
       groups:
         - name: pod-health

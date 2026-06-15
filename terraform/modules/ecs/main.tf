@@ -105,7 +105,7 @@ resource "aws_security_group" "alb_sg" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -153,10 +153,10 @@ resource "aws_security_group" "ecs_sg" {
 ###############################################################################
 resource "aws_lb" "ai_agent" {
   name               = "ai-agent-alb"
-  internal           = true
+  internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = var.private_subnets
+  subnets            = var.public_subnets
 
   tags = {
     Environment = "dev"
@@ -231,6 +231,7 @@ resource "aws_ecs_task_definition" "ai_agent" {
         { name = "EKS_CLUSTER_CA", value = var.eks_cluster_ca },
         { name = "CLUSTER_NAME", value = var.cluster_name },
         { name = "CONFIDENCE_THRESHOLD", value = "0.8" },
+        { name = "SNS_TOPIC_ARN", value = aws_sns_topic.ai_agent_reports.arn },
       ]
 
       secrets = [
@@ -336,16 +337,38 @@ resource "aws_route53_record" "ai_agent" {
 }
 
 ###############################################################################
+# SNS Topic for AI Agent Email Reports
+###############################################################################
+resource "aws_sns_topic" "ai_agent_reports" {
+  name = "ai-selfhealing-reports"
+
+  tags = {
+    Environment = "dev"
+    Project     = "ai-selfhealing"
+  }
+}
+
+###############################################################################
 # Outputs
 ###############################################################################
 output "alb_dns_name" {
-  description = "Internal ALB DNS for Alertmanager webhook"
+  description = "ALB DNS name (public — for dashboard access)"
   value       = aws_lb.ai_agent.dns_name
+}
+
+output "dashboard_url" {
+  description = "Public dashboard URL"
+  value       = "http://${aws_lb.ai_agent.dns_name}/dashboard"
 }
 
 output "webhook_url" {
   description = "Stable internal webhook URL for Alertmanager"
   value       = "http://ai-agent.ai-selfhealing.internal/webhook"
+}
+
+output "sns_topic_arn" {
+  description = "SNS Topic ARN for AI Agent email reports"
+  value       = aws_sns_topic.ai_agent_reports.arn
 }
 
 output "ecr_repository_url" {

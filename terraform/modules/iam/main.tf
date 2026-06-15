@@ -155,6 +155,14 @@ resource "aws_iam_role_policy" "ai_agent_policy" {
         Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/ai-selfhealing/*"
       },
       {
+        Sid    = "SNSPublishReports"
+        Action = [
+          "sns:Publish"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:sns:${var.region}:${data.aws_caller_identity.current.account_id}:ai-selfhealing-*"
+      },
+      {
         Sid    = "CloudWatchLogs"
         Action = [
           "logs:CreateLogGroup",
