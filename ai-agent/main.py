@@ -12,6 +12,7 @@ Key features:
   • Input validation via Pydantic models
   • Structured JSON logging for CloudWatch
   • Health + readiness endpoints with real connectivity checks
+  • Web dashboard + remediation history for observability
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import logging
 import os
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -30,7 +32,7 @@ import httpx
 import uvicorn
 from cachetools import TTLCache
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from tenacity import (
     retry,
     retry_if_exception,
@@ -61,6 +63,7 @@ AGENT_AWS_REGION = os.environ.get("AGENT_AWS_REGION", "eu-north-1")
 SCALE_MAX_REPLICAS = int(os.environ.get("SCALE_MAX_REPLICAS", "5"))
 COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "300"))  # 5 min
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+HISTORY_MAX = int(os.environ.get("HISTORY_MAX", "100"))
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -100,6 +103,9 @@ cooldown_cache: TTLCache = TTLCache(maxsize=1024, ttl=COOLDOWN_SECONDS)
 
 # Simple counters for health endpoint
 stats = {"alerts_processed": 0, "actions_taken": 0, "actions_skipped": 0}
+
+# Remediation history (capped ring buffer)
+remediation_history: deque = deque(maxlen=HISTORY_MAX)
 
 
 def get_observer() -> K8sObserver:
@@ -268,6 +274,166 @@ def execute_action(action_id: ActionId, alert: AlertDetail) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Dashboard HTML
+# ---------------------------------------------------------------------------
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Self-Healing Agent</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+    --blue: #3b82f6; --purple: #a855f7; --cyan: #06b6d4;
+    --text: #f1f5f9; --text2: #94a3b8;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
+  .header { display:flex; align-items:center; gap:16px; margin-bottom:28px; }
+  .header h1 { font-size:28px; font-weight:700; }
+  .header .badge { font-size:12px; padding:4px 12px; border-radius:99px; font-weight:600; }
+  .badge-green { background:#22c55e22; color:var(--green); border:1px solid #22c55e44; }
+  .badge-yellow { background:#eab30822; color:var(--yellow); border:1px solid #eab30844; }
+  .badge-red { background:#ef444422; color:var(--red); border:1px solid #ef444444; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:28px; }
+  .stat-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; }
+  .stat-card .label { font-size:13px; color:var(--text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
+  .stat-card .value { font-size:32px; font-weight:700; }
+  .stat-card .value.green { color:var(--green); }
+  .stat-card .value.blue { color:var(--blue); }
+  .stat-card .value.yellow { color:var(--yellow); }
+  .stat-card .value.purple { color:var(--purple); }
+  .section-title { font-size:20px; font-weight:600; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .section-title .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .timeline { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .timeline-header { display:grid; grid-template-columns:180px 120px 120px 100px 1fr 120px; padding:12px 16px; font-size:12px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid var(--border); font-weight:600; }
+  .timeline-row { display:grid; grid-template-columns:180px 120px 120px 100px 1fr 120px; padding:14px 16px; border-bottom:1px solid #1e293b55; font-size:14px; align-items:center; }
+  .timeline-row:hover { background:#ffffff05; }
+  .action-badge { font-size:11px; padding:3px 10px; border-radius:6px; font-weight:600; display:inline-block; }
+  .action-RESTART_POD { background:#3b82f622; color:var(--blue); border:1px solid #3b82f644; }
+  .action-SCALE_UP { background:#a855f722; color:var(--purple); border:1px solid #a855f744; }
+  .action-INVESTIGATE { background:#06b6d422; color:var(--cyan); border:1px solid #06b6d444; }
+  .action-MANUAL { background:#eab30822; color:var(--yellow); border:1px solid #eab30844; }
+  .action-SKIP { background:#64748b22; color:var(--text2); border:1px solid #64748b44; }
+  .conf-bar { height:6px; border-radius:3px; background:#334155; overflow:hidden; width:100px; }
+  .conf-bar-fill { height:100%; border-radius:3px; transition:width 0.3s; }
+  .conf-high { background:var(--green); }
+  .conf-mid { background:var(--yellow); }
+  .conf-low { background:var(--red); }
+  .empty-state { text-align:center; padding:48px; color:var(--text2); }
+  .refresh-info { font-size:12px; color:var(--text2); margin-left:auto; }
+  a { color:var(--blue); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .footer { margin-top:32px; font-size:13px; color:var(--text2); text-align:center; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#129302; AI Self-Healing Agent</h1>
+  <span class="badge badge-green" id="status-badge">&#9679; Online</span>
+  <span class="refresh-info">Auto-refresh: 5s</span>
+</div>
+
+<div class="grid" id="stats-grid">
+  <div class="stat-card"><div class="label">Alerts Processed</div><div class="value green" id="v-processed">—</div></div>
+  <div class="stat-card"><div class="label">Actions Taken</div><div class="value blue" id="v-taken">—</div></div>
+  <div class="stat-card"><div class="label">Actions Skipped</div><div class="value yellow" id="v-skipped">—</div></div>
+  <div class="stat-card"><div class="label">Uptime</div><div class="value purple" id="v-uptime">—</div></div>
+  <div class="stat-card"><div class="label">EKS Connection</div><div class="value green" id="v-eks">—</div></div>
+  <div class="stat-card"><div class="label">AI Model</div><div class="value" id="v-model" style="font-size:16px;">—</div></div>
+</div>
+
+<div class="section-title">
+  <span class="dot" style="background:var(--blue);"></span>
+  Remediation History
+  <span class="refresh-info"><a href="/history">JSON</a> &middot; <a href="/stats">Stats API</a></span>
+</div>
+
+<div class="timeline" id="timeline">
+  <div class="timeline-header">
+    <div>Time</div><div>Alert</div><div>Deployment</div><div>Action</div><div>AI Analysis</div><div>Confidence</div>
+  </div>
+  <div id="timeline-rows">
+    <div class="empty-state">No remediation events yet — waiting for alerts...</div>
+  </div>
+</div>
+
+<div class="footer">
+  AI Self-Healing Agent v3.0 &middot; NVIDIA NIM (GLM 5.1) &middot; ECS Fargate + EKS
+</div>
+
+<script>
+const fmt = s => {
+  if (!s) return '—';
+  const d = new Date(s);
+  return d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+};
+const fmtUptime = s => {
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return h + 'h ' + m + 'm';
+};
+
+async function refresh() {
+  try {
+    const [statsRes, historyRes, healthRes, readyRes] = await Promise.all([
+      fetch('/stats'), fetch('/history'), fetch('/health'), fetch('/ready')
+    ]);
+    const st = await statsRes.json();
+    const hi = await historyRes.json();
+    const he = await healthRes.json();
+    const re = await readyRes.json();
+
+    document.getElementById('v-processed').textContent = st.alerts_processed;
+    document.getElementById('v-taken').textContent = st.actions_taken;
+    document.getElementById('v-skipped').textContent = st.actions_skipped;
+    document.getElementById('v-uptime').textContent = fmtUptime(st.uptime_seconds);
+    document.getElementById('v-eks').textContent = re.eks_connected ? 'Connected' : 'Disconnected';
+    document.getElementById('v-eks').style.color = re.eks_connected ? 'var(--green)' : 'var(--red)';
+    document.getElementById('v-model').textContent = 'GLM 5.1';
+
+    const badge = document.getElementById('status-badge');
+    badge.textContent = re.ready ? '● Online' : '● Degraded';
+    badge.className = 'badge ' + (re.ready ? 'badge-green' : 'badge-yellow');
+
+    const rows = document.getElementById('timeline-rows');
+    if (!hi.length) {
+      rows.innerHTML = '<div class="empty-state">No remediation events yet — waiting for alerts...</div>';
+    } else {
+      rows.innerHTML = hi.slice().reverse().map(e => {
+        const confClass = e.confidence >= 0.8 ? 'conf-high' : e.confidence >= 0.5 ? 'conf-mid' : 'conf-low';
+        const pct = Math.round(e.confidence * 100);
+        return `<div class="timeline-row">
+          <div style="color:var(--text2);font-size:13px;">${fmt(e.timestamp)}</div>
+          <div style="font-weight:600;">${e.alertname}</div>
+          <div><span style="color:var(--text2);">${e.namespace}/</span>${e.deployment}</div>
+          <div><span class="action-badge action-${e.action}">${e.action}</span></div>
+          <div style="font-size:13px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px;" title="${(e.analysis||'').replace(/"/g,'"')}">${e.analysis || e.result || '—'}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="conf-bar"><div class="conf-bar-fill ${confClass}" style="width:${pct}%;"></div></div>
+            <span style="font-size:13px;">${pct}%</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch(err) {
+    console.error('Dashboard refresh failed:', err);
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
 
@@ -341,6 +507,18 @@ def readiness():
     )
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    """Beautiful web dashboard showing agent status and remediation history."""
+    return DASHBOARD_HTML
+
+
+@app.get("/history")
+def get_history():
+    """Return recent remediation events as JSON."""
+    return list(remediation_history)
+
+
 @app.post("/webhook")
 async def alertmanager_webhook(request: Request):
     """Main webhook: receive Alertmanager payload, analyse, remediate."""
@@ -386,20 +564,20 @@ async def alertmanager_webhook(request: Request):
                 extra={"correlation_id": cid},
             )
             stats["actions_skipped"] += 1
-            results.append(
-                RemediationResult(
-                    pod=alert.pod,
-                    namespace=alert.namespace,
-                    deployment=alert.deployment,
-                    alertname=alert.alertname,
-                    action="SKIP",
-                    confidence=0.0,
-                    result=f"Cooldown: {remaining}s remaining",
-                    skipped=True,
-                    skip_reason="cooldown",
-                    correlation_id=cid,
-                ).model_dump()
+            result_entry = RemediationResult(
+                pod=alert.pod,
+                namespace=alert.namespace,
+                deployment=alert.deployment,
+                alertname=alert.alertname,
+                action="SKIP",
+                confidence=0.0,
+                result=f"Cooldown: {remaining}s remaining",
+                skipped=True,
+                skip_reason="cooldown",
+                correlation_id=cid,
             )
+            results.append(result_entry.model_dump())
+            remediation_history.append(result_entry.model_dump())
             continue
 
         # ---- Gather context ----
@@ -441,19 +619,19 @@ async def alertmanager_webhook(request: Request):
             stats["actions_skipped"] += 1
 
         stats["alerts_processed"] += 1
-        results.append(
-            RemediationResult(
-                pod=alert.pod,
-                namespace=alert.namespace,
-                deployment=alert.deployment,
-                alertname=alert.alertname,
-                action=decision.action_id.value,
-                confidence=decision.confidence,
-                result=action_result,
-                analysis=decision.analysis,
-                correlation_id=cid,
-            ).model_dump()
+        result_entry = RemediationResult(
+            pod=alert.pod,
+            namespace=alert.namespace,
+            deployment=alert.deployment,
+            alertname=alert.alertname,
+            action=decision.action_id.value,
+            confidence=decision.confidence,
+            result=action_result,
+            analysis=decision.analysis,
+            correlation_id=cid,
         )
+        results.append(result_entry.model_dump())
+        remediation_history.append(result_entry.model_dump())
 
     return {"status": "processed", "details": results, "stats": stats}
 
