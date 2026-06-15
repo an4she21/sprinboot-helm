@@ -1,218 +1,219 @@
-# Grafana lightweight values
-service:
-  type: LoadBalancer
-  port: 80
+# Grafana lightweight values — ALL values MUST be under 'grafana:' for the subchart
+grafana:
+  service:
+    type: LoadBalancer
+    port: 80
 
-persistence:
-  enabled: false # Use emptyDir for testing to avoid PVC issues
+  persistence:
+    enabled: false # Use emptyDir for testing to avoid PVC issues
 
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 512Mi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
-# Securely inject admin password from ExternalSecret
-extraEnv:
-  - name: GF_SECURITY_ADMIN_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: grafana-admin-secret
-        key: admin-password
+  # Securely inject admin password from ExternalSecret
+  extraEnv:
+    - name: GF_SECURITY_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: grafana-admin-secret
+          key: admin-password
 
-# Pre-configure Prometheus data source
-datasources:
-  datasources.yaml:
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        type: prometheus
-        url: http://monitoring-prometheus-server:80
-        access: proxy
-        isDefault: true
+  # Pre-configure Prometheus data source
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://monitoring-prometheus-server:80
+          access: proxy
+          isDefault: true
 
-# Pre-provision AI Agent dashboard
-dashboardProviders:
-  dashboardproviders.yaml:
-    apiVersion: 1
-    providers:
-      - name: 'ai-agent'
-        orgId: 1
-        folder: 'AI Agent'
-        type: file
-        disableDeletion: false
-        editable: true
-        options:
-          path: /var/lib/grafana/dashboards/ai-agent
-          foldersFromFilesStructure: false
+  # Pre-provision AI Agent dashboard
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'ai-agent'
+          orgId: 1
+          folder: 'AI Agent'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/ai-agent
+            foldersFromFilesStructure: false
 
-dashboards:
-  ai-agent:
-    ai-self-healing-agent:
-      json: |
-        {
-          "annotations": {
-            "list": [
-              {
-                "builtIn": 1,
-                "datasource": "-- Grafana --",
-                "enable": true,
-                "hide": true,
-                "iconColor": "rgba(0, 211, 255, 1)",
-                "name": "Annotations & Alerts",
-                "type": "dashboard"
-              }
-            ]
-          },
-          "editable": true,
-          "fiscalYearStartMonth": 0,
-          "graphTooltip": 1,
-          "id": null,
-          "links": [],
-          "liveNow": false,
-          "panels": [
-            {
-              "title": "EKS Connection",
-              "type": "stat",
-              "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
-              "datasource": "Prometheus",
-              "targets": [{"expr": "ai_agent_eks_connected", "refId": "A"}],
-              "fieldConfig": {
-                "defaults": {
-                  "mappings": [
-                    {"type": "value", "options": {"0": {"text": "Disconnected", "color": "red"}, "1": {"text": "Connected", "color": "green"}}}
-                  ],
-                  "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+  dashboards:
+    ai-agent:
+      ai-self-healing-agent:
+        json: |
+          {
+            "annotations": {
+              "list": [
+                {
+                  "builtIn": 1,
+                  "datasource": "-- Grafana --",
+                  "enable": true,
+                  "hide": true,
+                  "iconColor": "rgba(0, 211, 255, 1)",
+                  "name": "Annotations & Alerts",
+                  "type": "dashboard"
                 }
-              }
-            },
-            {
-              "title": "Uptime",
-              "type": "stat",
-              "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
-              "datasource": "Prometheus",
-              "targets": [{"expr": "ai_agent_uptime_seconds", "refId": "A"}],
-              "fieldConfig": {
-                "defaults": {
-                  "unit": "s",
-                  "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 300}, {"color": "green", "value": 3600}]}
-                }
-              }
-            },
-            {
-              "title": "Average NIM API Latency",
-              "type": "gauge",
-              "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
-              "datasource": "Prometheus",
-              "targets": [{"expr": "ai_agent_nim_api_latency_avg_seconds", "refId": "A"}],
-              "fieldConfig": {
-                "defaults": {
-                  "unit": "s",
-                  "min": 0,
-                  "max": 10,
-                  "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 3}, {"color": "red", "value": 5}]}
-                }
-              }
-            },
-            {
-              "title": "Last Confidence Score",
-              "type": "gauge",
-              "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
-              "datasource": "Prometheus",
-              "targets": [{"expr": "ai_agent_last_confidence_score * 100", "refId": "A"}],
-              "fieldConfig": {
-                "defaults": {
-                  "unit": "percent",
-                  "min": 0,
-                  "max": 100,
-                  "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]}
-                }
-              }
-            },
-            {
-              "title": "Alerts Processed Over Time",
-              "type": "timeseries",
-              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-              "datasource": "Prometheus",
-              "targets": [
-                {"expr": "ai_agent_alerts_processed_total", "legendFormat": "Processed", "refId": "A"},
-                {"expr": "ai_agent_actions_taken_total", "legendFormat": "Taken", "refId": "B"},
-                {"expr": "ai_agent_actions_skipped_total", "legendFormat": "Skipped", "refId": "C"}
-              ],
-              "fieldConfig": {
-                "defaults": {"custom": {"fillOpacity": 10, "lineWidth": 2}},
-                "overrides": []
-              }
-            },
-            {
-              "title": "Action Breakdown",
-              "type": "piechart",
-              "gridPos": {"h": 8, "w": 6, "x": 12, "y": 4},
-              "datasource": "Prometheus",
-              "targets": [
-                {"expr": "ai_agent_eks_restarts_total", "legendFormat": "RESTART_POD", "refId": "A"},
-                {"expr": "ai_agent_eks_scale_ups_total", "legendFormat": "SCALE_UP", "refId": "B"},
-                {"expr": "ai_agent_eks_investigates_total", "legendFormat": "INVESTIGATE", "refId": "C"},
-                {"expr": "ai_agent_manual_escalations_total", "legendFormat": "MANUAL", "refId": "D"}
               ]
             },
-            {
-              "title": "NIM API Calls vs Failures",
-              "type": "timeseries",
-              "gridPos": {"h": 8, "w": 6, "x": 18, "y": 4},
-              "datasource": "Prometheus",
-              "targets": [
-                {"expr": "ai_agent_nim_api_calls_total", "legendFormat": "Calls", "refId": "A"},
-                {"expr": "ai_agent_nim_api_failures_total", "legendFormat": "Failures", "refId": "B"}
-              ],
-              "fieldConfig": {
-                "defaults": {"custom": {"fillOpacity": 10, "lineWidth": 2}}
-              }
-            },
-            {
-              "title": "Cooldown Cache Size",
-              "type": "timeseries",
-              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
-              "datasource": "Prometheus",
-              "targets": [{"expr": "ai_agent_cooldown_cache_size", "legendFormat": "Active Cooldowns", "refId": "A"}],
-              "fieldConfig": {
-                "defaults": {"custom": {"fillOpacity": 30, "lineWidth": 2}},
-                "overrides": [{"matcher": {"id": "byName", "options": "Active Cooldowns"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]}]
-              }
-            },
-            {
-              "title": "Remediation Actions by Type",
-              "type": "barchart",
-              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
-              "datasource": "Prometheus",
-              "targets": [
-                {"expr": "ai_agent_eks_restarts_total", "legendFormat": "RESTART_POD", "refId": "A"},
-                {"expr": "ai_agent_eks_scale_ups_total", "legendFormat": "SCALE_UP", "refId": "B"},
-                {"expr": "ai_agent_eks_investigates_total", "legendFormat": "INVESTIGATE", "refId": "C"},
-                {"expr": "ai_agent_manual_escalations_total", "legendFormat": "MANUAL", "refId": "D"},
-                {"expr": "ai_agent_cooldown_skips_total", "legendFormat": "COOLDOWN SKIP", "refId": "E"}
-              ],
-              "fieldConfig": {
-                "defaults": {},
-                "overrides": [
-                  {"matcher": {"id": "byName", "options": "RESTART_POD"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]},
-                  {"matcher": {"id": "byName", "options": "SCALE_UP"}, "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]},
-                  {"matcher": {"id": "byName", "options": "INVESTIGATE"}, "properties": [{"id": "color", "value": {"fixedColor": "cyan", "mode": "fixed"}}]},
-                  {"matcher": {"id": "byName", "options": "MANUAL"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]},
-                  {"matcher": {"id": "byName", "options": "COOLDOWN SKIP"}, "properties": [{"id": "color", "value": {"fixedColor": "super-light-gray", "mode": "fixed"}}]}
+            "editable": true,
+            "fiscalYearStartMonth": 0,
+            "graphTooltip": 1,
+            "id": null,
+            "links": [],
+            "liveNow": false,
+            "panels": [
+              {
+                "title": "EKS Connection",
+                "type": "stat",
+                "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+                "datasource": "Prometheus",
+                "targets": [{"expr": "ai_agent_eks_connected", "refId": "A"}],
+                "fieldConfig": {
+                  "defaults": {
+                    "mappings": [
+                      {"type": "value", "options": {"0": {"text": "Disconnected", "color": "red"}, "1": {"text": "Connected", "color": "green"}}}
+                    ],
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+                  }
+                }
+              },
+              {
+                "title": "Uptime",
+                "type": "stat",
+                "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+                "datasource": "Prometheus",
+                "targets": [{"expr": "ai_agent_uptime_seconds", "refId": "A"}],
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "s",
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 300}, {"color": "green", "value": 3600}]}
+                  }
+                }
+              },
+              {
+                "title": "Average NIM API Latency",
+                "type": "gauge",
+                "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+                "datasource": "Prometheus",
+                "targets": [{"expr": "ai_agent_nim_api_latency_avg_seconds", "refId": "A"}],
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "s",
+                    "min": 0,
+                    "max": 10,
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 3}, {"color": "red", "value": 5}]}
+                  }
+                }
+              },
+              {
+                "title": "Last Confidence Score",
+                "type": "gauge",
+                "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+                "datasource": "Prometheus",
+                "targets": [{"expr": "ai_agent_last_confidence_score * 100", "refId": "A"}],
+                "fieldConfig": {
+                  "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100,
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]}
+                  }
+                }
+              },
+              {
+                "title": "Alerts Processed Over Time",
+                "type": "timeseries",
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+                "datasource": "Prometheus",
+                "targets": [
+                  {"expr": "ai_agent_alerts_processed_total", "legendFormat": "Processed", "refId": "A"},
+                  {"expr": "ai_agent_actions_taken_total", "legendFormat": "Taken", "refId": "B"},
+                  {"expr": "ai_agent_actions_skipped_total", "legendFormat": "Skipped", "refId": "C"}
+                ],
+                "fieldConfig": {
+                  "defaults": {"custom": {"fillOpacity": 10, "lineWidth": 2}},
+                  "overrides": []
+                }
+              },
+              {
+                "title": "Action Breakdown",
+                "type": "piechart",
+                "gridPos": {"h": 8, "w": 6, "x": 12, "y": 4},
+                "datasource": "Prometheus",
+                "targets": [
+                  {"expr": "ai_agent_eks_restarts_total", "legendFormat": "RESTART_POD", "refId": "A"},
+                  {"expr": "ai_agent_eks_scale_ups_total", "legendFormat": "SCALE_UP", "refId": "B"},
+                  {"expr": "ai_agent_eks_investigates_total", "legendFormat": "INVESTIGATE", "refId": "C"},
+                  {"expr": "ai_agent_manual_escalations_total", "legendFormat": "MANUAL", "refId": "D"}
                 ]
+              },
+              {
+                "title": "NIM API Calls vs Failures",
+                "type": "timeseries",
+                "gridPos": {"h": 8, "w": 6, "x": 18, "y": 4},
+                "datasource": "Prometheus",
+                "targets": [
+                  {"expr": "ai_agent_nim_api_calls_total", "legendFormat": "Calls", "refId": "A"},
+                  {"expr": "ai_agent_nim_api_failures_total", "legendFormat": "Failures", "refId": "B"}
+                ],
+                "fieldConfig": {
+                  "defaults": {"custom": {"fillOpacity": 10, "lineWidth": 2}}
+                }
+              },
+              {
+                "title": "Cooldown Cache Size",
+                "type": "timeseries",
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+                "datasource": "Prometheus",
+                "targets": [{"expr": "ai_agent_cooldown_cache_size", "legendFormat": "Active Cooldowns", "refId": "A"}],
+                "fieldConfig": {
+                  "defaults": {"custom": {"fillOpacity": 30, "lineWidth": 2}},
+                  "overrides": [{"matcher": {"id": "byName", "options": "Active Cooldowns"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]}]
+                }
+              },
+              {
+                "title": "Remediation Actions by Type",
+                "type": "barchart",
+                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+                "datasource": "Prometheus",
+                "targets": [
+                  {"expr": "ai_agent_eks_restarts_total", "legendFormat": "RESTART_POD", "refId": "A"},
+                  {"expr": "ai_agent_eks_scale_ups_total", "legendFormat": "SCALE_UP", "refId": "B"},
+                  {"expr": "ai_agent_eks_investigates_total", "legendFormat": "INVESTIGATE", "refId": "C"},
+                  {"expr": "ai_agent_manual_escalations_total", "legendFormat": "MANUAL", "refId": "D"},
+                  {"expr": "ai_agent_cooldown_skips_total", "legendFormat": "COOLDOWN SKIP", "refId": "E"}
+                ],
+                "fieldConfig": {
+                  "defaults": {},
+                  "overrides": [
+                    {"matcher": {"id": "byName", "options": "RESTART_POD"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]},
+                    {"matcher": {"id": "byName", "options": "SCALE_UP"}, "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]},
+                    {"matcher": {"id": "byName", "options": "INVESTIGATE"}, "properties": [{"id": "color", "value": {"fixedColor": "cyan", "mode": "fixed"}}]},
+                    {"matcher": {"id": "byName", "options": "MANUAL"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]},
+                    {"matcher": {"id": "byName", "options": "COOLDOWN SKIP"}, "properties": [{"id": "color", "value": {"fixedColor": "super-light-gray", "mode": "fixed"}}]}
+                  ]
+                }
               }
-            }
-          ],
-          "refresh": "10s",
-          "schemaVersion": 38,
-          "style": "dark",
-          "tags": ["ai-agent", "self-healing", "sre"],
-          "templating": {"list": []},
-          "time": {"from": "now-1h", "to": "now"},
-          "title": "AI Self-Healing Agent",
-          "uid": "ai-self-healing-agent",
-          "version": 1
-        }
+            ],
+            "refresh": "10s",
+            "schemaVersion": 38,
+            "style": "dark",
+            "tags": ["ai-agent", "self-healing", "sre"],
+            "templating": {"list": []},
+            "time": {"from": "now-1h", "to": "now"},
+            "title": "AI Self-Healing Agent",
+            "uid": "ai-self-healing-agent",
+            "version": 1
+          }
