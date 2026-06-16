@@ -57,7 +57,7 @@ prometheus:
         - name: pod-health
           rules:
             - alert: PodCrashLooping
-              expr: rate(kube_pod_container_status_restarts_total[5m]) > 0.1
+              expr: kube_pod_container_status_restarts_total > 5
               for: 2m
               labels:
                 severity: critical
